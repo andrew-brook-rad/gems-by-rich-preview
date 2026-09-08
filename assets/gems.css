@@ -380,6 +380,15 @@ background-film[data-playing] .film-hero__video {
   max-width: none;
   padding-bottom: 32px;
 }
+/* The film control is kept for keyboard and assistive users but not shown. */
+.film-toggle:not(:focus-visible) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .film-toggle {
   display: inline-flex;
   align-items: center;
