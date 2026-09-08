@@ -110,7 +110,7 @@
 
     <main id="MainContent" tabindex="-1"><div class="shopify-section " id="shopify-section-selector"><link rel="stylesheet" href="/gems-by-rich-preview/assets/diamond-selector.css">
 <script type="module" src="/gems-by-rich-preview/assets/diamond-selector.js"></script>
-<diamond-selector class="diamond-finder" data-section-id="selector">
+<diamond-selector class="diamond-finder" data-section-id="selector" data-step="0">
   <header class="finder-heading">
     <div class="finder-heading__text">
     <p class="eyebrow">A little guidance, at every step</p>
@@ -137,11 +137,12 @@
   <p data-selector-fallback>This interactive example needs JavaScript. You can still <a href="#enquire">talk through your preferences with Rich</a> or <a href="/gems-by-rich-preview/pages/diamond-guide">read the diamond guide</a>.</p>
   <div data-selector-ui hidden>
     <nav class="finder-steps" aria-label="Diamond selection steps">
+      <p class="finder-steps__progress caps"><span data-step-label>Step 1 of 4</span> <span class="finder-steps__bar" aria-hidden="true"><span></span></span></p>
       <ol>
-        <li><button type="button" data-go-step="0" aria-current="step"><span>01</span> Shape</button></li>
-        <li><button type="button" data-go-step="1"><span>02</span> Size & budget</button></li>
-        <li><button type="button" data-go-step="2"><span>03</span> Quality</button></li>
-        <li><button type="button" data-go-step="3"><span>04</span> Your matches</button></li>
+        <li><button type="button" data-go-step="0" aria-current="step"><span class="finder-steps__marker" aria-hidden="true">1</span><span class="finder-steps__name">Shape</span></button></li>
+        <li><button type="button" data-go-step="1"><span class="finder-steps__marker" aria-hidden="true">2</span><span class="finder-steps__name">Size &amp; budget</span></button></li>
+        <li><button type="button" data-go-step="2"><span class="finder-steps__marker" aria-hidden="true">3</span><span class="finder-steps__name">Quality</span></button></li>
+        <li><button type="button" data-go-step="3"><span class="finder-steps__marker" aria-hidden="true">4</span><span class="finder-steps__name">Your matches</span></button></li>
       </ol>
     </nav>
     <div class="finder-layout">
@@ -394,6 +395,9 @@
         <a href="/gems-by-rich-preview/pages/diamond-guide">Choosing a diamond</a>
         <a href="/gems-by-rich-preview/pages/gemstone-guide">Coloured gemstones</a>
         <a href="/gems-by-rich-preview/pages/gem-stories">Famous stones</a>
+        <a href="/gems-by-rich-preview/pages/gem-meanings">What gemstones represent</a>
+        <a href="/gems-by-rich-preview/pages/legendary-diamonds">Legendary diamonds</a>
+        <a href="/gems-by-rich-preview/pages/storied-stones">Coloured stones with a past</a>
       </nav>
     </div>
     <div class="footer-column">

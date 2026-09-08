@@ -55,15 +55,38 @@
   }
 }
 .finder-steps {
-  border-block: 1px solid var(--line);
   margin-bottom: 40px;
   scroll-margin-top: 20px;
 }
+.finder-steps__progress {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+  color: var(--ink-soft);
+}
+.finder-steps__bar {
+  flex: 1;
+  height: 2px;
+  background: var(--rule);
+}
+.finder-steps__bar > span {
+  display: block;
+  height: 100%;
+  width: 25%;
+  background: var(--ink);
+  transition: width 0.4s var(--ease);
+}
+.diamond-finder[data-step="1"] .finder-steps__bar > span { width: 50%; }
+.diamond-finder[data-step="2"] .finder-steps__bar > span { width: 75%; }
+.diamond-finder[data-step="3"] .finder-steps__bar > span { width: 100%; }
 .finder-steps ol {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
   list-style: none;
   padding: 0;
+  margin: 0;
 }
 .finder-steps li {
   min-width: 0;
@@ -71,23 +94,92 @@
 .finder-steps button {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 18px 6px;
-  border: 0;
-  background: transparent;
+  gap: 12px;
   width: 100%;
-  min-height: 58px;
-  font-size: 14px;
-  color: var(--muted);
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   text-align: left;
 }
-.finder-steps button span {
+.finder-steps__marker {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
   font-size: 12px;
+  letter-spacing: 0;
+}
+.finder-steps button[data-done] {
+  color: var(--ink);
+}
+.finder-steps button[data-done] .finder-steps__marker {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  font-size: 0;
+}
+.finder-steps button[data-done] .finder-steps__marker::after {
+  content: "";
+  width: 6px;
+  height: 10px;
+  margin-top: -2px;
+  border: solid var(--paper);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 .finder-steps button[aria-current] {
-  color: var(--forest);
-  box-shadow: inset 0 -2px var(--forest);
-  font-weight: 600;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+.finder-steps button[aria-current] .finder-steps__marker {
+  border-color: var(--paper);
+}
+/* Each step has its own tone so the journey reads as distinct stages. */
+.finder-workspace {
+  transition: background 0.3s;
+}
+.diamond-finder[data-step="1"] .finder-workspace,
+.diamond-finder[data-step="2"] .finder-workspace {
+  padding: clamp(24px, 3vw, 40px);
+}
+.diamond-finder[data-step="1"] .finder-workspace {
+  background: var(--paper-soft);
+}
+.diamond-finder[data-step="2"] .finder-workspace {
+  --paper: #151515;
+  --paper-soft: #2a2a2a;
+  --ink: #ffffff;
+  --ink-soft: #c9c9c9;
+  --rule: #4d4d4d;
+  --forest: #ffffff;
+  --forest-deep: #ffffff;
+  --ivory: #151515;
+  --line: #4d4d4d;
+  --muted: #c9c9c9;
+  background: #151515;
+  color: #ffffff;
+}
+.diamond-finder[data-step="2"] .finder-workspace .button--dark {
+  border-color: #ffffff;
+  color: #ffffff;
+}
+.diamond-finder[data-step="2"] .finder-workspace .button--dark:hover {
+  background: #ffffff;
+  color: #151515;
+}
+.diamond-finder[data-step="3"] .finder-workspace {
+  padding-top: 8px;
+  border-top: 2px solid var(--ink);
 }
 .finder-layout {
   display: grid;
@@ -570,7 +662,7 @@
     margin-bottom: 48px;
   }
   .finder-steps button {
-    font-size: 16px;
+    font-size: 12px;
   }
 }
 @media (hover: hover) {
@@ -589,4 +681,8 @@
   .finder-shape__face {
     transition: none;
   }
+}
+/* Step titles receive focus programmatically when a step opens; the step tone already shows where you are. */
+.diamond-finder h2[tabindex="-1"]:focus-visible {
+  outline: 0;
 }

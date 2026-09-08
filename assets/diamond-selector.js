@@ -256,13 +256,17 @@ class DiamondSelector extends HTMLElement {
 
   showStep(step, focus = true) {
     this.step = step;
+    this.dataset.step = String(step);
+    const label = this.querySelector("[data-step-label]");
+    if (label) label.textContent = `Step ${step + 1} of 4`;
     this.querySelectorAll("[data-panel]").forEach((panel) => {
       panel.hidden = Number(panel.dataset.panel) !== step;
     });
     this.querySelectorAll(".finder-steps [data-go-step]").forEach((button) => {
-      if (Number(button.dataset.goStep) === step)
-        button.setAttribute("aria-current", "step");
+      const index = Number(button.dataset.goStep);
+      if (index === step) button.setAttribute("aria-current", "step");
       else button.removeAttribute("aria-current");
+      button.toggleAttribute("data-done", index < step);
     });
     this.querySelector("[data-step-controls]").hidden = step === 3;
     this.querySelector("[data-previous]").hidden = step === 0;
