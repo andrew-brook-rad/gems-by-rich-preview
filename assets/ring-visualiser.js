@@ -1,25 +1,29 @@
-// Ring visualiser: a procedural ring on a procedural hand, both built from
+// Ring visualiser: a studio ring with an optional hand outline, built from
 // measurements in millimetres. See docs/superpowers/specs/2026-09-09-ring-visualiser-design.md
 import * as THREE from "three";
 import {
   CARAT_RANGE,
   HAND_PRESETS,
   HAND_RANGE,
-  HAND_TONES,
   METALS,
   SETTINGS,
   SHAPES,
   describeRing,
   handProportions,
   matchingPreset,
-  outline,
   parseState,
   ringSizeFor,
   stoneDimensions,
+  stoneOutline,
+  settingContour,
+  settingProfile,
 } from "ring-model";
 
-const BAND_TUBE = 0.9; // half the band thickness
-const BAND_WIDTH = 2.1; // along the finger
+import { BAND_SECTION, bandGeometry, accentSeat } from "./ring-band.js";
+import { stoneTriangles } from "./ring-stone-geometry.js";
+import { gemGeometry, gemMaterial } from "./ring-gem.js";
+
+const BAND_TUBE = BAND_SECTION.tube;
 const DEG = Math.PI / 180;
 
 class RingVisualiser extends HTMLElement {
@@ -27,8 +31,9 @@ class RingVisualiser extends HTMLElement {
     if (this.started) return;
     this.started = true;
     this.state = parseState(new URLSearchParams(location.search));
-    this.view = "hand";
-    this.orbit = { azimuth: 2.75, polar: 0.72, distance: 260 };
+    this.view = "closeup";
+    this.orbit = { azimuth: 0.28, polar: 0.32, distance: 65 };
+    this.zoom = 1;
     this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.stage = this.querySelector("[data-stage]");
     this.buildControls();
@@ -42,16 +47,33 @@ class RingVisualiser extends HTMLElement {
     this.rebuild();
     this.bindInteraction();
     this.startLoop();
+    this.loadStones();
+  }
+
+  // Real facet meshes arrive after the first frame; until then, and if they
+  // fail to load, stones use the simpler procedural cut.
+  async loadStones() {
+    const url = this.dataset.stones;
+    if (!url) return;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(response.statusText);
+      this.stones = await response.json();
+    } catch (error) {
+      return;
+    }
+    if (!this.isConnected || !this.renderer) return;
+    this.rebuild();
+    this.requestRender();
   }
 
   /* Controls */
 
   buildControls() {
     const groups = {
-      shape: SHAPES.map((s) => [s, s]),
+      shape: SHAPES.map((s) => [s, s === "Round" ? "Round brilliant" : s]),
       setting: SETTINGS.map((s) => [s.id, s.label]),
       metal: METALS.map((m) => [m.id, m.label, m.color]),
-      tone: HAND_TONES.map((t) => [t.id, t.label, t.color]),
       hand: HAND_PRESETS.map((p) => [p.id, p.label]),
     };
     for (const [key, options] of Object.entries(groups)) {
@@ -121,6 +143,7 @@ class RingVisualiser extends HTMLElement {
     setText(this, "[data-readout=span]", `${(this.state.span / 10).toFixed(1)} cm`);
     setText(this, "[data-readout=finger]", `${this.state.finger.toFixed(1)} mm · about UK ${size.uk} / US ${size.us}`);
     setText(this, "[data-summary]", describeRing(this.state));
+    setText(this, ".visualiser__hint", this.view === "hand" ? "Hand outline · Approximate scale" : "Drag to rotate · Pinch to zoom");
     this.querySelectorAll("[data-view]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.view === this.view));
     });
@@ -147,10 +170,22 @@ class RingVisualiser extends HTMLElement {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x141414);
+    this.scene.background = new THREE.Color(0x191c1b);
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(studioEnvironment(), 0.02).texture;
+    const studio = studioEnvironment();
+    this.environmentTarget = pmrem.fromScene(studio, 0.01);
+    this.scene.environment = this.environmentTarget.texture;
     pmrem.dispose();
+    // The gems trace rays into a sharp, high-range copy of the same studio so
+    // each facet flashes a distinct lamp rather than a blurred average.
+    this.gemEnvironment = new THREE.WebGLCubeRenderTarget(256, {
+      type: THREE.HalfFloatType,
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter,
+    });
+    new THREE.CubeCamera(0.1, 100, this.gemEnvironment).update(this.renderer, studio);
+    disposeChildren(studio);
+    this.gemLibrary = new Map();
     this.camera = new THREE.PerspectiveCamera(28, 1, 1, 3000);
     this.world = new THREE.Group();
     this.scene.add(this.world);
@@ -160,7 +195,13 @@ class RingVisualiser extends HTMLElement {
     const rim = new THREE.DirectionalLight(0xffffff, 0.6);
     rim.position.set(160, 120, -220);
     this.scene.add(rim);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+    this.scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x62503a, 0.65));
+    for (const [i, direction] of STUDIO_LIGHT_DIRECTIONS.entries()) {
+      if (i % 3 !== 0) continue;
+      const lamp = new THREE.DirectionalLight(i % 3 === 0 ? 0xffedcf : 0xeaf2ff, 0.45);
+      lamp.position.set(...direction).multiplyScalar(150);
+      this.scene.add(lamp);
+    }
     this.glintLights = STUDIO_LIGHT_DIRECTIONS.map((d) => new THREE.Vector3(...d).normalize());
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.stage);
@@ -173,86 +214,52 @@ class RingVisualiser extends HTMLElement {
     this.frameCamera();
   }
 
+  // One unit-width facet mesh and ray-tracing material per shape, scaled per
+  // stone. Every shape keeps fixed proportions so the cache never goes stale.
+  gemFor(shape, dims) {
+    if (!this.stones) return null;
+    let gem = this.gemLibrary.get(shape);
+    if (!gem) {
+      const unit = { width: 1, length: dims.length / dims.width, depth: dims.depth / dims.width };
+      const geometry = gemGeometry(THREE, stoneTriangles(this.stones, shape, unit, 0.16));
+      const material = gemMaterial(THREE, geometry, this.gemEnvironment.texture);
+      gem = { geometry, material };
+      this.gemLibrary.set(shape, gem);
+    }
+    return gem;
+  }
+
   /* Hand */
 
   buildHand() {
     const p = handProportions(this.state);
-    const tone = HAND_TONES.find((t) => t.id === this.state.tone) || HAND_TONES[0];
-    const skin = new THREE.MeshPhysicalMaterial({
-      color: tone.color,
-      roughness: 0.62,
-      metalness: 0,
-      sheen: 0.6,
-      sheenRoughness: 0.7,
-      sheenColor: new THREE.Color(0xffffff),
-      clearcoat: 0.06,
-      clearcoatRoughness: 0.5,
-    });
     const hand = new THREE.Group();
-    this.world.add(hand);
-    // Palm: a rounded slab between the wrist (z = 0) and the knuckles (z = -palmLength).
-    hand.add(new THREE.Mesh(palmGeometry(p), skin));
-    // Wrist stub for context.
-    const wrist = new THREE.Mesh(new THREE.CapsuleGeometry(p.wristWidth / 2 - 2, 40, 6, 20), skin);
-    wrist.rotation.x = Math.PI / 2;
-    wrist.scale.z = (p.thickness / 2 + 1) / (p.wristWidth / 2 - 2);
-    wrist.position.set(0, -0.5, 26);
-    hand.add(wrist);
-    // Fingers: little to index, each three segments, slightly spread and curled.
+    const shape = new THREE.Shape();
+    shape.moveTo(-p.wristWidth / 2, -12);
+    shape.bezierCurveTo(-p.breadth * 0.57, p.palmLength * 0.35, -p.breadth * 0.53, p.palmLength * 0.8, p.fingers[0].base.x - p.fingers[0].width / 2, p.fingers[0].base.y);
     for (const f of p.fingers) {
-      const base = new THREE.Group();
-      base.position.set(f.base.x, p.thickness * 0.08, -f.base.y);
-      base.rotation.y = -f.spread * DEG;
-      hand.add(base);
-      let parent = base;
-      const curls = [7, 13, 9];
-      f.segments.forEach((len, i) => {
-        const seg = new THREE.Group();
-        seg.rotation.x = -curls[i] * DEG;
-        parent.add(seg);
-        const radius = (f.width / 2) * [1, 0.93, 0.85][i];
-        const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(1, len - radius * 0.6), 6, 24), skin);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.scale.z = 0.86; // fingers are a little flatter than round
-        mesh.position.z = -len / 2;
-        seg.add(mesh);
-        if (f.id === "ring" && i === 0) {
-          this.ringMount = new THREE.Group();
-          this.ringMount.position.z = -len * 0.56;
-          this.ringMount.rotation.x = -Math.PI / 2;
-          seg.add(this.ringMount);
-          this.buildRing(f.width / 2 + 0.35);
-        }
-        const next = new THREE.Group();
-        next.position.z = -len;
-        seg.add(next);
-        parent = next;
-      });
+      const angle = f.spread * DEG;
+      const dx = Math.sin(angle), dy = Math.cos(angle), r = f.width / 2;
+      const x = f.base.x + dx * (f.length - r), y = f.base.y + dy * (f.length - r);
+      shape.lineTo(x - dy * r, y + dx * r);
+      shape.bezierCurveTo(x - dy * r + dx * r * 1.4, y + dx * r + dy * r * 1.4, x + dy * r + dx * r * 1.4, y - dx * r + dy * r * 1.4, x + dy * r, y - dx * r);
+      shape.lineTo(f.base.x + dy * r, f.base.y - dx * r);
     }
-    // Thumb: two segments, out to the side and forward.
-    const t = p.thumb;
-    const thumb = new THREE.Group();
-    thumb.position.set(t.base.x, p.thickness * 0.05, -t.base.y);
-    thumb.rotation.order = "YXZ";
-    thumb.rotation.y = -t.angle * DEG;
-    thumb.rotation.x = -22 * DEG;
-    hand.add(thumb);
-    let parent = thumb;
-    t.segments.forEach((len, i) => {
-      const seg = new THREE.Group();
-      seg.rotation.x = -[10, 18][i] * DEG;
-      parent.add(seg);
-      const radius = (t.width / 2) * [1, 0.9][i];
-      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(1, len - radius * 0.6), 6, 24), skin);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.scale.z = 0.85;
-      mesh.position.z = -len / 2;
-      seg.add(mesh);
-      const next = new THREE.Group();
-      next.position.z = -len;
-      seg.add(next);
-      parent = next;
-    });
+    const t = p.thumb, tx = t.base.x + Math.sin(t.angle * DEG) * t.length, ty = t.base.y + Math.cos(t.angle * DEG) * t.length;
+    shape.quadraticCurveTo(p.breadth * 0.48, p.palmLength * 0.42, tx - t.width * 0.35, ty + t.width * 0.4);
+    shape.bezierCurveTo(tx + t.width * 0.5, ty + t.width, tx + t.width, ty - t.width * 0.3, tx + t.width * 0.25, ty - t.width * 0.55);
+    shape.quadraticCurveTo(p.breadth * 0.55, p.palmLength * 0.16, p.wristWidth / 2, -12);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(shape.getPoints(12).map(v => new THREE.Vector3(v.x, 0, -v.y))), new THREE.LineBasicMaterial({ color: 0xc2b7a2, transparent: true, opacity: 0.65 }));
+    hand.add(line);
+    this.world.add(hand);
+    hand.visible = this.view === "hand";
+    const f = p.fingers.find(f => f.id === "ring");
+    this.ringMount = new THREE.Group();
+    const along = f.length * 0.22;
+    this.ringMount.position.set(f.base.x + Math.sin(f.spread * DEG) * along, 0, -f.base.y - Math.cos(f.spread * DEG) * along);
+    this.ringMount.rotation.set(-Math.PI / 2, 0, f.spread * DEG);
+    this.world.add(this.ringMount);
+    this.buildRing(f.width / 2 + 0.35);
     this.hand = hand;
     this.handLength = p.length;
   }
@@ -267,85 +274,147 @@ class RingVisualiser extends HTMLElement {
     const R = innerRadius;
     const metal = new THREE.MeshStandardMaterial({ color: metalDef.color, metalness: 1, roughness: 0.2, envMapIntensity: 1.4 });
     const stone = stoneMaterial(dims.depth);
-    const accent = stoneMaterial(1.2);
     const mount = this.ringMount;
 
-    const band = new THREE.Mesh(new THREE.TorusGeometry(R + BAND_TUBE, BAND_TUBE, 24, 96), metal);
-    band.rotation.x = Math.PI / 2;
-    band.scale.y = BAND_WIDTH / (2 * BAND_TUBE);
+    const band = new THREE.Mesh(bandGeometry(THREE, R), metal);
+    band.name = "shank";
     mount.add(band);
 
-    const outer = R + 2 * BAND_TUBE;
-    const crownH = dims.width * 0.16;
-    const pavilionH = dims.depth - crownH;
+    const profile = settingProfile(dims, R);
+    const { outer, crown: crownH, pavilion: pavilionH } = profile;
     const head = new THREE.Group();
-    head.position.z = outer + pavilionH * 0.55;
+    head.position.z = profile.girdle;
     mount.add(head);
+    this.head = head;
 
-    const centreGeometry = stoneGeometry(state.shape, dims, 32);
-    head.add(new THREE.Mesh(centreGeometry, stone));
-    head.add(glints(centreGeometry, this.glintLights, dims.width * 0.9));
-
-    if (setting.bezel) {
-      head.add(new THREE.Mesh(rimGeometry(state.shape, dims, 1.09, 0.55), metal));
-    } else if (setting.prongs) {
-      const points = outline(state.shape, setting.prongs * 8);
-      for (let i = 0; i < setting.prongs; i++) {
-        const idx = Math.round(((i + 0.5) / setting.prongs) * points.length) % points.length;
-        const [px, py] = points[idx];
-        const prongH = pavilionH * 0.55 + crownH + 0.5;
-        const prong = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, prongH, 12), metal);
-        prong.rotation.x = Math.PI / 2;
-        prong.position.set(px * dims.width * 1.05, py * dims.length * 1.05, crownH + 0.5 - prongH / 2);
-        head.add(prong);
+    const addDiamond = (host, shape, dimensions) => {
+      const gem = this.gemFor(shape, dimensions);
+      if (gem) {
+        const mesh = new THREE.Mesh(gem.geometry, gem.material);
+        mesh.scale.setScalar(dimensions.width);
+        mesh.userData.shared = true;
+        mesh.add(glints(gem.geometry, this.glintLights, dimensions.width));
+        host.add(mesh);
+        return;
       }
-      head.add(new THREE.Mesh(rimGeometry(state.shape, dims, 0.98, 0.34, -pavilionH * 0.5), metal));
-      const small = Math.min(dims.width, dims.length);
-      const collar = new THREE.Mesh(new THREE.CylinderGeometry(small * 0.22, small * 0.3, pavilionH * 0.55 + 0.3, 16), metal);
-      collar.rotation.x = Math.PI / 2;
-      collar.position.z = -pavilionH * 0.5 - (pavilionH * 0.55 + 0.3) / 2 + 0.2;
-      head.add(collar);
+      const geometry = stoneGeometry(shape, dimensions, 32);
+      host.add(new THREE.Mesh(geometry, stone));
+      host.add(glints(geometry, this.glintLights, dimensions.width));
+    };
+    const addBasket = (host, shape, dimensions, prongs = 4) => {
+      const seat = settingProfile(dimensions, R);
+      host.add(new THREE.Mesh(rimGeometry(shape, dimensions, seat.galleryScale, 0.18, seat.galleryZ, 0.23), metal));
+      const contour = settingContour(shape, dimensions, 0.19);
+      for (let i = 0; i < prongs; i++) {
+        const index = Math.round((i + 0.5) / prongs * contour.length) % contour.length;
+        const [x, y] = contour[index];
+        const tipZ = Math.min(0.14, seat.crown * 0.3);
+        const path = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(x * 0.63, y * 0.63, seat.galleryZ),
+          new THREE.Vector3(x, y, -0.12),
+          new THREE.Vector3(x, y, tipZ),
+        ]);
+        host.add(new THREE.Mesh(new THREE.TubeGeometry(path, 16, 0.20, 8, false), metal));
+        const tip = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), metal);
+        tip.position.set(x, y, tipZ);
+        host.add(tip);
+      }
+    };
+    addDiamond(head, state.shape, dims);
+    // Open shoulder struts meet the gallery from outside the pavilion.
+    for (const sign of [-1, 1]) {
+      const x = Math.min(outer * 0.72, dims.width * 0.5 + 1.6);
+      const z = Math.sqrt(Math.max(0, (R + BAND_TUBE) ** 2 - x ** 2));
+      const path = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(sign * x, 0, z),
+        new THREE.Vector3(sign * (dims.width * 0.37 + 0.45), 0, profile.girdle - pavilionH * 0.8),
+        new THREE.Vector3(sign * (dims.width * 0.30 + 0.23), 0, profile.girdle + profile.galleryZ),
+      ]);
+      mount.add(new THREE.Mesh(new THREE.TubeGeometry(path, 24, 0.28, 10, false), metal));
+    }
+    if (setting.bezel) {
+      head.add(new THREE.Mesh(rimGeometry(state.shape, dims, 1, 0.24, 0, 0.26), metal));
+      head.add(new THREE.Mesh(rimGeometry(state.shape, dims, profile.galleryScale, 0.20, profile.galleryZ, 0.23), metal));
+      // Slim basket posts support the bezel without a solid cup under the stone.
+      addBasket(head, state.shape, dims, 4);
+    } else {
+      addBasket(head, state.shape, dims, setting.prongs);
     }
 
-    if (setting.halo) {
-      const ringPoints = outline(state.shape, 200);
-      const count = Math.max(14, Math.round((dims.length + dims.width) * 1.6));
-      for (let i = 0; i < count; i++) {
-        const [px, py] = ringPoints[Math.floor((i / count) * ringPoints.length)];
-        const g = stoneGeometry("Round", { length: 1.3, width: 1.3, depth: 0.8 }, 12);
-        const small = new THREE.Mesh(g, accent);
-        small.position.set(px * (dims.width + 2.2), py * (dims.length + 2.2), crownH * 0.2);
-        head.add(small);
+    if (setting.halo || setting.hiddenHalo) {
+      const hidden = setting.hiddenHalo;
+      const size = hidden ? 0.75 : 1.15;
+      const scale = hidden ? profile.galleryScale : 1;
+      const clearance = hidden ? 0.72 : 1.02;
+      const z = hidden ? profile.galleryZ : -0.10;
+      const curve = new THREE.CatmullRomCurve3(settingContour(state.shape, dims, clearance, scale).map(([x, y]) => new THREE.Vector3(x, y, z)), true, "centripetal");
+      const count = Math.floor(curve.getLength() / (size + 0.24));
+      const positions = [];
+      for (const point of curve.getSpacedPoints(count).slice(0, -1)) {
+        if (positions.every(other => other.distanceTo(point) >= size + 0.12)) positions.push(point);
       }
-      head.add(new THREE.Mesh(rimGeometry(state.shape, dims, 1 + 2.2 / dims.width, 0.5, -0.6), metal));
+      positions.forEach(position => {
+        const small = new THREE.Group();
+        small.position.copy(position);
+        addDiamond(small, "Round", { width: size, length: size, depth: size * 0.61 });
+        head.add(small);
+      });
+      head.add(new THREE.Mesh(rimGeometry(state.shape, dims, scale, 0.23, z - size * 0.52, clearance), metal));
     }
 
     if (setting.sideStones) {
-      const side = stoneDimensions(state.shape, state.carat * 0.25);
-      const offset = dims.width / 2 + side.width / 2 + 0.7;
+      const side = stoneDimensions("Round", state.carat * 0.18);
+      const offset = dims.width / 2 + side.width / 2 + 0.75;
       for (const dir of [-1, 1]) {
-        const g = new THREE.Group();
-        g.position.set(dir * offset, 0, Math.sqrt(Math.max(0, outer * outer - offset * offset)) - outer);
-        g.rotation.y = Math.atan2(dir * offset, outer);
-        const sg = stoneGeometry(state.shape, side, 24);
-        g.add(new THREE.Mesh(sg, stone));
-        g.add(glints(sg, this.glintLights, side.width * 0.8));
-        g.add(new THREE.Mesh(rimGeometry(state.shape, side, 1.0, 0.28, -side.depth * 0.4), metal));
-        head.add(g);
+        const group = new THREE.Group();
+        group.position.set(dir * offset, 0, -0.45);
+        addDiamond(group, "Round", side);
+        addBasket(group, "Round", side);
+        head.add(group);
+        const support = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(dir * Math.min(offset, outer * 0.86), 0, outer * 0.5),
+          new THREE.Vector3(dir * offset, 0, profile.girdle - side.depth - 0.7),
+          new THREE.Vector3(dir * (offset + side.width * 0.3 + 0.5), 0, profile.girdle - 0.45 + settingProfile(side, R).galleryZ),
+        ]);
+        mount.add(new THREE.Mesh(new THREE.TubeGeometry(support, 16, 0.25, 8, false), metal));
       }
     }
 
     if (setting.pave) {
-      const radius = outer + 0.2;
-      const spacing = 1.45 / radius;
-      const count = Math.floor(1.25 / spacing);
-      for (let i = -count; i <= count; i++) {
-        const theta = i * spacing;
-        if (Math.abs(theta) * radius < Math.max(dims.width, dims.length) * 0.55 + 1) continue;
-        const small = new THREE.Mesh(stoneGeometry("Round", { length: 1.2, width: 1.2, depth: 0.75 }, 10), accent);
-        small.position.set(Math.sin(theta) * radius, 0, Math.cos(theta) * radius);
-        small.rotation.y = theta;
-        mount.add(small);
+      // Each accent sits above the surface, with its own metal seat. Spacing
+      // uses arc length and stone diameter so neighbours cannot intersect.
+      const startX = dims.width / 2 + (setting.halo ? 2.2 : 0.8);
+      let theta = Math.asin(Math.min(0.92, startX / outer));
+      for (let i = 0; theta < 1.40; i++) {
+        const size = setting.graduated ? Math.max(0.85, 1.65 - i * 0.16) : 1.15;
+        const seat = accentSeat(R, size);
+        const radius = seat.radius;
+        for (const dir of [-1, 1]) {
+          const group = new THREE.Group();
+          group.name = "shoulder-diamond";
+          group.userData.diameter = size;
+          group.position.set(dir * Math.sin(theta) * radius, 0, Math.cos(theta) * radius);
+          group.rotation.y = dir * theta;
+          const dimensions = { width: size, length: size, depth: size * 0.61 };
+          addDiamond(group, "Round", dimensions);
+          const rim = new THREE.Mesh(new THREE.TorusGeometry(seat.rimRadius, seat.rimTube, 8, 32), metal);
+          rim.position.z = seat.rimZ;
+          group.add(rim);
+          // Supports stay outside the pavilion, down to the band's surface.
+          for (const side of [-1, 1]) {
+            const baseY = side * seat.baseY;
+            const surface = R + BAND_TUBE + BAND_TUBE * Math.sqrt(1 - (baseY / (BAND_SECTION.width / 2)) ** 2);
+            const base = new THREE.Vector3(0, baseY, surface - radius - 0.04);
+            const top = new THREE.Vector3(0, side * seat.rimRadius, seat.rimZ);
+            const direction = top.clone().sub(base);
+            const post = new THREE.Mesh(new THREE.CylinderGeometry(seat.postRadius, seat.postRadius, direction.length(), 8), metal);
+            post.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+            post.position.copy(base).add(top).multiplyScalar(0.5);
+            group.add(post);
+          }
+          mount.add(group);
+        }
+        theta += (size + 0.28) / radius;
       }
     }
   }
@@ -355,21 +424,26 @@ class RingVisualiser extends HTMLElement {
   ringWorldPosition() {
     const v = new THREE.Vector3();
     this.world.updateMatrixWorld(true);
-    if (this.ringMount) this.ringMount.getWorldPosition(v);
+    if (this.head) this.head.getWorldPosition(v);
     return v;
   }
 
   frameCamera() {
+    if (!this.ringMount) return;
     const aspect = this.stage.clientWidth / Math.max(1, this.stage.clientHeight);
     this.camera.aspect = aspect;
     const target = this.ringWorldPosition();
     if (this.view === "hand") {
-      this.orbit.distance = this.handLength * (aspect < 0.9 ? 1.6 : 1.25);
-      target.z += this.handLength * 0.08; // centre between knuckles and palm
-      target.x += this.handLength * 0.06; // and a little towards the thumb
-      target.y -= 4;
+      target.set(0, 0, -this.handLength * 0.46);
+      this.orbit.distance = this.handLength * 3.4 / Math.min(1, aspect);
     } else {
-      this.orbit.distance = 52;
+      const bounds = new THREE.Box3().setFromObject(this.ringMount);
+      bounds.getCenter(target);
+      // Allow space for view buttons and the caption at every screen width.
+      const size = bounds.getSize(new THREE.Vector3());
+      const frame = Math.max(size.x / Math.min(1, aspect), size.z, size.y * 0.65);
+      this.orbit.distance = frame / (2 * Math.tan(14 * DEG)) * 1.6 / this.zoom;
+      target.y += size.y * 0.18;
     }
     this.target = target;
     this.placeCamera();
@@ -398,8 +472,11 @@ class RingVisualiser extends HTMLElement {
 
   setView(view) {
     this.view = view;
-    this.orbit.azimuth = view === "hand" ? 2.75 : 2.4;
-    this.orbit.polar = view === "hand" ? 0.72 : 0.8;
+    this.orbit.azimuth = view === "hand" ? 0 : 0.28;
+    this.orbit.polar = view === "hand" ? 0.01 : view === "top" ? 0.01 : 0.32;
+    this.zoom = 1;
+    if (!this.renderer) return;
+    this.hand.visible = view === "hand";
     this.frameCamera();
     this.reflectControls();
     this.requestRender();
@@ -408,45 +485,95 @@ class RingVisualiser extends HTMLElement {
   /* Interaction and rendering */
 
   bindInteraction() {
-    let dragging = null;
-    this.stage.addEventListener("pointerdown", (event) => {
-      dragging = { x: event.clientX, y: event.clientY, azimuth: this.orbit.azimuth, polar: this.orbit.polar };
+    const canvas = this.querySelector("canvas");
+    const pointers = new Map();
+    let previous = null;
+    canvas.addEventListener("pointerdown", event => {
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       this.dragging = true;
-      this.stage.setPointerCapture(event.pointerId);
+      previous = null;
+      canvas.setPointerCapture(event.pointerId);
     });
-    this.stage.addEventListener("pointermove", (event) => {
-      if (!dragging) return;
-      const limitAzimuth = this.view === "hand" ? 1.3 : Math.PI * 4;
-      this.orbit.azimuth = clamp(dragging.azimuth - (event.clientX - dragging.x) * 0.008, 2.75 - limitAzimuth, 2.75 + limitAzimuth);
-      this.orbit.polar = clamp(dragging.polar + (event.clientY - dragging.y) * 0.006, 0.2, this.view === "hand" ? 1.25 : 1.15);
-      this.placeCamera();
+    canvas.addEventListener("pointermove", event => {
+      if (!pointers.has(event.pointerId)) return;
+      const old = pointers.get(event.pointerId);
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const distance = Math.hypot(a.x - b.x, a.y - b.y);
+        if (previous && this.view !== "hand") {
+          this.zoom = clamp(this.zoom * distance / previous, 0.7, 1.8);
+          this.frameCamera();
+        }
+        previous = distance;
+      } else if (this.view !== "hand") {
+        this.orbit.azimuth -= (event.clientX - old.x) * 0.008;
+        this.orbit.polar = clamp(this.orbit.polar + (event.clientY - old.y) * 0.006, 0.01, 1.48);
+        this.placeCamera();
+      }
       this.requestRender();
     });
-    const stop = () => {
-      dragging = null;
-      this.dragging = false;
+    const stop = event => {
+      pointers.delete(event.pointerId);
+      previous = null;
+      this.dragging = pointers.size > 0;
     };
-    this.stage.addEventListener("pointerup", stop);
-    this.stage.addEventListener("pointercancel", stop);
+    canvas.addEventListener("pointerup", stop);
+    canvas.addEventListener("pointercancel", stop);
+    canvas.addEventListener("lostpointercapture", stop);
+    canvas.addEventListener("wheel", event => {
+      if (this.view === "hand") return;
+      event.preventDefault();
+      this.zoom = clamp(this.zoom * Math.exp(-event.deltaY * 0.001), 0.7, 1.8);
+      this.frameCamera();
+      this.requestRender();
+    }, { passive: false });
+    canvas.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "-", "Home"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "Home") return this.setView("closeup");
+      if (this.view === "hand") return;
+      if (event.key === "+" || event.key === "-") this.zoom = clamp(this.zoom + (event.key === "+" ? 0.1 : -0.1), 0.7, 1.8);
+      else if (event.key === "ArrowLeft" || event.key === "ArrowRight") this.orbit.azimuth += event.key === "ArrowLeft" ? 0.12 : -0.12;
+      else this.orbit.polar = clamp(this.orbit.polar + (event.key === "ArrowUp" ? -0.08 : 0.08), 0.01, 1.48);
+      this.frameCamera();
+      this.requestRender();
+    });
     this.visible = true;
-    new IntersectionObserver(([entry]) => {
-      this.visible = entry.isIntersecting;
-    }).observe(this.stage);
+    this.intersectionObserver = new IntersectionObserver(([entry]) => { this.visible = entry.isIntersecting; });
+    this.intersectionObserver.observe(this.stage);
   }
 
-  // A slow turn in the close-up view keeps the facets flashing; rendering
-  // otherwise happens only on demand.
+  // Animate the studio reflections gently, keeping the chosen camera still.
   startLoop() {
-    const tick = () => {
-      if (this.visible && !this.dragging && !this.reducedMotion && this.view === "closeup") {
-        this.orbit.azimuth += 0.004;
-        this.placeCamera();
+    let last = 0;
+    const tick = now => {
+      if (!this.isConnected) return;
+      if (this.visible && !document.hidden && !this.dragging && !this.reducedMotion && this.view !== "hand" && now - last > 32) {
+        last = now;
+        this.world.traverse(node => {
+          if (node.material?.uniforms?.time) node.material.uniforms.time.value = now / 1000;
+        });
         this.renderer.render(this.scene, this.camera);
         this.setAttribute("data-ready", "");
       }
-      requestAnimationFrame(tick);
+      this.animation = requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    this.animation = requestAnimationFrame(tick);
+  }
+
+  disconnectedCallback() {
+    cancelAnimationFrame(this.animation);
+    this.resizeObserver?.disconnect();
+    this.intersectionObserver?.disconnect();
+    if (this.world) disposeChildren(this.world);
+    for (const gem of this.gemLibrary?.values() || []) {
+      gem.geometry.dispose();
+      gem.material.dispose();
+    }
+    this.environmentTarget?.dispose();
+    this.gemEnvironment?.dispose();
+    this.renderer?.dispose();
   }
 
   requestRender() {
@@ -454,6 +581,7 @@ class RingVisualiser extends HTMLElement {
     this.pending = true;
     requestAnimationFrame(() => {
       this.pending = false;
+      if (!this.isConnected) return;
       this.renderer.render(this.scene, this.camera);
       this.setAttribute("data-ready", "");
     });
@@ -496,14 +624,15 @@ function stoneMaterial(thickness) {
     color: 0xffffff,
     metalness: 0,
     roughness: 0.0,
-    transmission: 0.28,
-    thickness: Math.max(0.6, thickness),
+    transmission: 0.94,
+    thickness: Math.max(0.15, thickness * 0.08),
     ior: 2.4,
-    envMapIntensity: 3.5,
+    envMapIntensity: 1.8,
     clearcoat: 1,
     clearcoatRoughness: 0,
     specularIntensity: 1.5,
-    iridescence: 0.35,
+    dispersion: 0.08,
+    iridescence: 0.10,
     iridescenceIOR: 1.9,
     iridescenceThicknessRange: [200, 500],
   });
@@ -511,13 +640,13 @@ function stoneMaterial(thickness) {
 
 // A faceted stone from a 2D outline: table, crown, girdle, pavilion, culet.
 function stoneGeometry(shape, dims, steps) {
-  const points = outline(shape, steps);
+  const points = stoneOutline(shape, steps);
   const crownH = dims.width * 0.16;
   const pavilionH = dims.depth - crownH;
   const ringAt = (scale, z) => points.map(([x, y]) => [x * dims.width * scale, y * dims.length * scale, z]);
   const table = ringAt(0.56, crownH);
-  const girdleTop = ringAt(1, 0.25);
-  const girdleBottom = ringAt(1, -0.25);
+  const girdleTop = ringAt(1, Math.min(0.08, crownH * 0.15));
+  const girdleBottom = ringAt(1, -Math.min(0.08, crownH * 0.15));
   const breakRing = ringAt(0.55, -pavilionH * 0.5);
   const culet = [0, 0, -pavilionH];
   const tri = [];
@@ -527,8 +656,12 @@ function stoneGeometry(shape, dims, steps) {
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     push(centre, table[i], table[j]);
-    push(table[i], girdleTop[i], girdleTop[j]);
-    push(table[i], girdleTop[j], table[j]);
+    const mid = [(table[i][0] + table[j][0] + girdleTop[i][0] + girdleTop[j][0]) / 4 * 1.06,
+      (table[i][1] + table[j][1] + girdleTop[i][1] + girdleTop[j][1]) / 4 * 1.06, crownH * (i % 2 ? 0.42 : 0.58)];
+    push(table[i], girdleTop[i], mid);
+    push(girdleTop[i], girdleTop[j], mid);
+    push(girdleTop[j], table[j], mid);
+    push(table[j], table[i], mid);
     push(girdleTop[i], girdleBottom[i], girdleBottom[j]);
     push(girdleTop[i], girdleBottom[j], girdleTop[j]);
     push(girdleBottom[i], breakRing[i], breakRing[j]);
@@ -556,6 +689,7 @@ function glints(geometry, lightDirections, size) {
     b.fromBufferAttribute(pos, i + 1);
     c.fromBufferAttribute(pos, i + 2);
     n.copy(b).sub(a).cross(c.clone().sub(a)).normalize();
+    if (n.z < 0.1 || n.z > 0.99) continue;
     const centre = a.clone().add(b).add(c).multiplyScalar(1 / 3).addScaledVector(n, 0.05);
     centres.push(centre.x, centre.y, centre.z);
     normals.push(n.x, n.y, n.z);
@@ -569,12 +703,14 @@ function glints(geometry, lightDirections, size) {
     blending: THREE.AdditiveBlending,
     uniforms: {
       lights: { value: lightDirections },
-      baseSize: { value: size * 6 },
+      baseSize: { value: Math.min(26, size * 4) },
+      time: { value: 0 },
     },
     vertexShader: `
       attribute vec3 facetNormal;
       uniform vec3 lights[${lightDirections.length}];
       uniform float baseSize;
+      uniform float time;
       varying float vAlpha;
       void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
@@ -583,12 +719,13 @@ function glints(geometry, lightDirections, size) {
         vec3 r = reflect(-v, n);
         float s = 0.0;
         for (int i = 0; i < ${lightDirections.length}; i++) {
-          s = max(s, pow(max(dot(r, lights[i]), 0.0), 90.0));
+          s = max(s, pow(max(dot(r, normalize(lights[i] + vec3(sin(time * 0.65 + float(i)) * 0.09, 0.0, cos(time * 0.55 + float(i)) * 0.09))), 0.0), 38.0));
         }
         s *= smoothstep(0.0, 0.25, dot(n, v));
-        vAlpha = s;
+        s *= 0.45 + 0.55 * pow(0.5 + 0.5 * sin(time * 1.8 + position.x * 7.0 + position.y * 11.0), 4.0);
+        vAlpha = s * 0.85;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = baseSize * s * (240.0 / -mv.z);
+        gl_PointSize = clamp(baseSize * sqrt(s) * (65.0 / -mv.z), 1.0, 42.0);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
@@ -607,50 +744,17 @@ function glints(geometry, lightDirections, size) {
 }
 
 // A metal rim following the outline (bezel, gallery under the stone, halo base).
-function rimGeometry(shape, dims, scale, tube, z = 0) {
-  const points = outline(shape, 96).map(
-    ([x, y]) => new THREE.Vector3(x * dims.width * scale, y * dims.length * scale, z),
-  );
-  const curve = new THREE.CatmullRomCurve3(points, true, "catmullrom", 0.2);
-  return new THREE.TubeGeometry(curve, 96, tube, 10, true);
-}
-
-// The palm as a rounded slab: a soft trapezoid from wrist to knuckles with a
-// thenar bulge on the thumb side, extruded with a bevel for rounded edges.
-function palmGeometry(p) {
-  const w0 = p.wristWidth / 2;
-  const w1 = p.breadth / 2;
-  const L = p.palmLength;
-  const shape = new THREE.Shape();
-  shape.moveTo(-w0, -6);
-  shape.lineTo(w0 * 0.9, -6);
-  shape.quadraticCurveTo(w1 * 1.25, L * 0.25, w1 * 1.02, L * 0.55); // thumb-side bulge
-  shape.quadraticCurveTo(w1 * 1.02, L * 0.9, w1 * 0.92, L);
-  shape.lineTo(-w1 * 0.92, L);
-  shape.quadraticCurveTo(-w1 * 1.02, L * 0.6, -w0 * 1.02, L * 0.2);
-  shape.quadraticCurveTo(-w0, 0, -w0, -6);
-  const thickness = p.thickness;
-  const bevel = thickness / 2 - 0.5;
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth: thickness - 2 * bevel,
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelSegments: 6,
-    curveSegments: 24,
-  });
-  // Shape y ran towards the fingertips; turn it to run along -Z with the
-  // thickness centred on y = 0.
-  geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, -(thickness - 2 * bevel) / 2, 0);
-  geometry.computeVertexNormals();
-  return geometry;
+function rimGeometry(shape, dims, scale, tube, z = 0, clearance = 0) {
+  const points = settingContour(shape, dims, clearance, scale).map(([x, y]) => new THREE.Vector3(x, y, z));
+  const curve = new THREE.CatmullRomCurve3(points, true, "centripetal");
+  return new THREE.TubeGeometry(curve, 128, tube, 8, true);
 }
 
 function disposeChildren(group) {
   while (group.children.length) {
     const child = group.children[0];
     child.traverse((node) => {
+      if (node.userData.shared) return;
       node.geometry?.dispose();
       node.material?.dispose?.();
     });
@@ -675,26 +779,43 @@ const STUDIO_LIGHT_DIRECTIONS = [
   [0, 0.4, 1],
   [-0.4, 0.8, -0.9],
   [0.5, 0.2, -1],
+  [-0.2, 1, 0.15],
+  [0.3, 1, -0.2],
+  [-1, 0.25, 0.2],
+  [1, 0.6, -0.2],
 ];
 
-// A small studio for reflections: a soft grey room, three large panels and
-// a ring of small hot lamps that give the facets something to flash.
+// A small studio for reflections: a graded room that is bright above and
+// dim below, three large soft panels, and a ring of hot lamps. Crown facets
+// pick up the bright ceiling and lamps while pavilion facets return the dark
+// floor, which is the contrast a cut stone needs to read as a diamond.
 function studioEnvironment() {
   const scene = new THREE.Scene();
-  const room = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ side: THREE.BackSide, color: 0x555555, roughness: 1 }));
-  room.scale.set(8, 8, 8);
-  scene.add(room);
+  const room = new THREE.SphereGeometry(8, 48, 24);
+  const positions = room.getAttribute("position");
+  const colours = [];
+  const smooth = (edge0, edge1, x) => {
+    const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  for (let i = 0; i < positions.count; i++) {
+    const height = positions.getY(i) / 8;
+    const value = height < 0 ? 0.04 + 0.14 * smooth(-1, 0, height) : 0.18 + 0.42 * smooth(0, 1, height);
+    colours.push(value, value * 0.995, value * 0.98);
+  }
+  room.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
+  scene.add(new THREE.Mesh(room, new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true })));
   const panel = (x, y, z, sx, sy, sz, intensity) => {
     const box = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(intensity) }));
     box.position.set(x, y, z);
     box.scale.set(sx, sy, sz);
     scene.add(box);
   };
-  panel(-2.5, 3, 1.5, 2.2, 0.1, 1.6, 8);
-  panel(2.6, 2.2, -1.5, 1.4, 0.1, 2.4, 5);
-  panel(0, -3.5, 2, 3, 0.1, 1, 2);
+  panel(-2.5, 3, 1.5, 2.6, 0.1, 2.0, 5);
+  panel(2.6, 2.2, -1.5, 1.8, 0.1, 2.8, 3.5);
+  panel(0, -3.5, 2, 3, 0.1, 1, 1.2);
   for (const [x, y, z] of STUDIO_LIGHT_DIRECTIONS) {
-    panel(x * 3.6, y * 3.6, z * 3.6, 0.22, 0.22, 0.22, 40);
+    panel(x * 3.6, y * 3.6, z * 3.6, 0.4, 0.4, 0.4, 22);
   }
   return scene;
 }

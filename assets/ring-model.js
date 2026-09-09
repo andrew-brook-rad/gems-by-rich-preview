@@ -256,6 +256,43 @@ export const SETTINGS = [
   { id: "pave", label: "Pavé band", prongs: 4, halo: false, sideStones: 0, bezel: false, pave: true },
 ];
 
+SETTINGS.push(
+  { id: "diamond-shoulders", label: "Diamond shoulders", prongs: 4, halo: false, sideStones: 0, bezel: false, pave: true, graduated: true },
+  { id: "halo-pave", label: "Halo & pavé", prongs: 4, halo: true, sideStones: 0, bezel: false, pave: true },
+  { id: "hidden-halo", label: "Hidden halo", prongs: 4, halo: false, sideStones: 0, bezel: false, pave: true, hiddenHalo: true },
+);
+
+// The entire pavilion clears the shank. Gallery rails follow the pavilion
+// outside its surface; a hollow basket leaves the culet unobstructed.
+export function settingProfile(dims, innerRadius) {
+  const crown = dims.width * 0.16;
+  const pavilion = dims.depth - crown;
+  const outer = innerRadius + 1.8;
+  return { crown, pavilion, outer, girdle: outer + pavilion + 0.35, galleryZ: -pavilion * 0.48, galleryScale: 0.60 };
+}
+
+// Consistent counter-clockwise winding is essential for visible outward facets.
+export function stoneOutline(shape, steps = 64) {
+  const points = outline(shape, steps);
+  const area = points.reduce((sum, p, i) => {
+    const q = points[(i + 1) % points.length];
+    return sum + p[0] * q[1] - q[0] * p[1];
+  }, 0);
+  return area < 0 ? points.reverse() : points;
+}
+
+// Offset by millimetres along the contour normal, preserving elongated shapes.
+export function settingContour(shape, dims, clearance = 0, scale = 1, steps = 96) {
+  const points = stoneOutline(shape, steps).map(([x, y]) => [x * dims.width * scale, y * dims.length * scale]);
+  return points.map((p, i) => {
+    const prev = points[(i + points.length - 1) % points.length];
+    const next = points[(i + 1) % points.length];
+    const dx = next[0] - prev[0], dy = next[1] - prev[1];
+    const length = Math.hypot(dx, dy) || 1;
+    return [p[0] + dy / length * clearance, p[1] - dx / length * clearance];
+  });
+}
+
 export const METALS = [
   { id: "yellow", label: "Yellow gold", color: "#f2c46d" },
   { id: "white", label: "White gold / platinum", color: "#e6e6e6" },
@@ -267,7 +304,7 @@ export const CARAT_RANGE = { min: 0.3, max: 5, step: 0.05 };
 const DEFAULT_STATE = {
   setting: "solitaire",
   shape: "Round",
-  carat: 1,
+  carat: 1.5,
   metal: "yellow",
   tone: "porcelain",
   length: 180,

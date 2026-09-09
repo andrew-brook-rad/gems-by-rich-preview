@@ -113,16 +113,17 @@
 <section class="visualiser section-space" aria-labelledby="VisualiserTitle-visualiser">
   <div class="section-title">
     <h1 id="VisualiserTitle-visualiser">Try a ring</h1>
-    <p>Swap the setting, stone and hand to see how a ring might sit.</p>
+    <p>Find your favourite shape, explore the details, make it yours.</p>
   </div>
-  <ring-visualiser class="visualiser__app">
+  <ring-visualiser class="visualiser__app" data-stones="/gems-by-rich-preview/assets/ring-stones.json">
     <div class="visualiser__stage" data-stage>
-      <canvas class="visualiser__canvas" aria-label="Three-dimensional preview of the ring on a hand. Drag to look around." role="img"></canvas>
+      <canvas class="visualiser__canvas" aria-label="Interactive ring preview. Drag or use arrow keys to rotate. Pinch or use plus and minus to zoom. Home resets the view." tabindex="0" role="img"></canvas>
       <div class="visualiser__views" role="group" aria-label="View">
-        <button type="button" class="visualiser__view" data-view="hand" aria-pressed="true">On the hand</button>
-        <button type="button" class="visualiser__view" data-view="closeup" aria-pressed="false">Close up</button>
+        <button type="button" class="visualiser__view" data-view="closeup" aria-pressed="true">Ring detail</button>
+        <button type="button" class="visualiser__view" data-view="top" aria-pressed="false">Top view</button>
+        <button type="button" class="visualiser__view" data-view="hand" aria-pressed="false">Hand outline</button>
       </div>
-      <p class="visualiser__hint small" aria-hidden="true">Drag to look around</p>
+      <p class="visualiser__hint small" aria-hidden="true">Drag to rotate · Pinch to zoom</p>
       <p class="visualiser__fallback small" data-fallback-note hidden>The three-dimensional preview needs WebGL. Your choices below still build a summary you can send to Rich.</p>
     </div>
     <form class="visualiser__controls" onsubmit="return false">
@@ -132,8 +133,8 @@
       </div>
       <div class="visualiser__group">
         <label class="caps" for="VisCarat-visualiser">Carat weight</label>
-        <input class="visualiser__range" id="VisCarat-visualiser" type="range" data-carat min="0.3" max="5" step="0.05" value="1">
-        <p class="visualiser__readout" data-carat-readout aria-live="polite">1.00 ct</p>
+        <input class="visualiser__range" id="VisCarat-visualiser" type="range" data-carat min="0.3" max="5" step="0.05" value="1.5">
+        <p class="visualiser__readout" data-carat-readout aria-live="polite">1.50 ct</p>
       </div>
       <div class="visualiser__group">
         <p class="caps" id="VisSetting-visualiser">Setting</p>
@@ -166,17 +167,13 @@
           </div>
         </details>
       </div>
-      <div class="visualiser__group">
-        <p class="caps" id="VisTone-visualiser">Hand tone</p>
-        <div class="visualiser__options visualiser__options--swatches" role="radiogroup" aria-labelledby="VisTone-visualiser" data-options="tone"></div>
-      </div>
       <div class="visualiser__summary">
         <p class="small" data-summary></p>
         <button type="button" class="button" data-attach>Ask Rich about this</button>
       </div>
     </form>
   </ring-visualiser>
-  <p class="small visualiser__note">Illustrative proportions and generic settings on a modelled hand. Not a quotation or a specific stone.</p>
+  <p class="small visualiser__note">Illustrative proportions and generic settings. The optional hand outline is a guide to scale. Not a quotation or a specific stone. Stone facet models: Diamond Gem Shape Set by brandon_grey, CC BY 4.0.</p>
 </section>
 <script type="module" src="/gems-by-rich-preview/assets/ring-visualiser.js"></script>
 

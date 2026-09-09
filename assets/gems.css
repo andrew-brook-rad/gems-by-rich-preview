@@ -1449,9 +1449,10 @@ background-film[data-playing] .film-hero__video {
   align-items: start;
 }
 .visualiser__stage {
-  position: relative;
-  aspect-ratio: 4 / 5;
-  background: #111111;
+  aspect-ratio: 1 / 1;
+  background: #191c1b;
+  position: sticky;
+  top: 90px;
   overflow: hidden;
   touch-action: none;
   cursor: grab;
@@ -1459,7 +1460,6 @@ background-film[data-playing] .film-hero__video {
 .visualiser__stage:active {
   cursor: grabbing;
 }
-.visualiser__photo,
 .visualiser__canvas {
   position: absolute;
   inset: 0;
@@ -1633,4 +1633,25 @@ ring-visualiser[data-fallback] .visualiser__canvas {
 .visualiser__slider output {
   font-size: 13px;
   color: var(--ink-soft);
+}
+
+/* The ring remains generous on a phone, with full-size touch controls. */
+.visualiser__view { min-height: 44px; letter-spacing: 0.08em; padding: 10px 12px; }
+.visualiser__options button { min-height: 44px; }
+.visualiser__range { min-height: 44px; touch-action: pan-y; }
+.visualiser__canvas:focus-visible { outline: 2px solid var(--paper); outline-offset: -4px; }
+.visualiser__hint { pointer-events: none; }
+@media (max-width: 749px) {
+  .visualiser__app { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .visualiser__stage { position: sticky; top: 12px; z-index: 2; aspect-ratio: 1 / 1; max-height: 46svh; width: 100%; }
+  .visualiser__views { touch-action: manipulation; }
+  .visualiser__views { top: 12px; left: 12px; right: 12px; gap: 4px; }
+  .visualiser__view { flex: 1; padding: 10px 5px; font-size: 10px; letter-spacing: 0.04em; }
+  .visualiser__hint { left: 12px; right: 12px; text-align: center; font-size: 11px; }
+  .visualiser__options { gap: 6px; }
+  .visualiser__options button { padding: 10px 12px; }
+  .visualiser__controls { gap: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .visualiser__canvas { transition: none; }
 }
