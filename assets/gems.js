@@ -231,3 +231,16 @@ document.addEventListener("change", (event) => {
 });
 restoreDiamondPreference();
 document.addEventListener("shopify:section:load", restoreDiamondPreference);
+
+// Remove a ring visualiser brief from the enquiry form.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-clear-ring-brief]");
+  if (!button) return;
+  const form = button.closest("form");
+  const field = form?.querySelector("[data-ring-brief-field]");
+  if (field) {
+    field.disabled = true;
+    field.value = "";
+  }
+  button.closest("[data-ring-brief-context]").hidden = true;
+});

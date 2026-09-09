@@ -235,6 +235,7 @@ class DiamondSelector extends HTMLElement {
         <dl class="finder-result__grades">${pair("Colour", d.colour)}${pair("Clarity", d.clarity)}${pair("Cut grade", d.cut || "Not assigned")}${pair("Fluorescence", d.fluorescence)}</dl>
         <details class="finder-result__details"><summary>Explore the details</summary><dl>${pair("Polish", d.polish)}${pair("Symmetry", d.symmetry)}${pair("L/W ratio", d.ratio.toFixed(2))}${pair("Table", `${d.table}%`)}${pair("Depth", `${d.depth}%`)}${pair("Sample lab field", d.lab)}</dl><p>Invented example ${d.id}. There is no grading report or real stone behind this listing.${d.cut ? "" : " Overall cut grades are not assigned to the fancy-shape examples."}</p></details>
         <button class="finder-result__discuss" type="button" data-choose="${d.id}">Discuss this example <span aria-hidden="true">↗</span></button>
+        <a class="finder-result__try" href="/pages/ring-visualiser?shape=${encodeURIComponent(d.shape)}&carat=${d.carat.toFixed(2)}">See it on a hand</a>
       </article>`,
       )
       .join("");

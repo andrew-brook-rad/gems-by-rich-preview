@@ -1440,3 +1440,153 @@ background-film[data-playing] .film-hero__video {
     gap: 28px;
   }
 }
+
+/* Ring visualiser */
+.visualiser__app {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: start;
+}
+.visualiser__stage {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  background: #111111;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+.visualiser__stage:active {
+  cursor: grabbing;
+}
+.visualiser__photo,
+.visualiser__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.visualiser__canvas {
+  display: block;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+ring-visualiser[data-ready] .visualiser__canvas {
+  opacity: 1;
+}
+ring-visualiser[data-fallback] .visualiser__canvas {
+  display: none;
+}
+.visualiser__views {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 6px;
+}
+.visualiser__view {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.visualiser__view[aria-pressed="true"] {
+  background: var(--paper);
+  border-color: var(--paper);
+  color: var(--ink);
+}
+.visualiser__hint {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.visualiser__fallback {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+}
+.visualiser__controls {
+  display: grid;
+  gap: 28px;
+}
+.visualiser__group {
+  display: grid;
+  gap: 12px;
+}
+.visualiser__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.visualiser__options button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+.visualiser__options button:hover {
+  border-color: var(--ink);
+}
+.visualiser__options button[aria-checked="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.visualiser__options--metals button::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--swatch);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  vertical-align: -1px;
+}
+.visualiser__range {
+  width: 100%;
+  accent-color: var(--ink);
+}
+.visualiser__readout {
+  font-size: 14px;
+}
+.visualiser__summary {
+  display: grid;
+  gap: 16px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+}
+.visualiser__note {
+  margin-top: clamp(24px, 3vw, 40px);
+  text-align: center;
+}
+.bespoke__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.finder-result__try {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+@media (max-width: 900px) {
+  .visualiser__app {
+    grid-template-columns: 1fr;
+  }
+}

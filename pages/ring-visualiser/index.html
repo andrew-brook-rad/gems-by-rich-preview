@@ -32,11 +32,11 @@
 >
 <meta
   property="og:url"
-  content="/pages/contact"
+  content="/pages/ring-visualiser"
 >
 <meta
   property="og:title"
-  content="Speak with Rich"
+  content="Try a ring"
 >
 <meta
   property="og:type"
@@ -44,32 +44,32 @@
 >
 <meta
   property="og:description"
-  content="Start a conversation about a stone, a piece or a question."
+  content="Swap the setting, stone and hand size to see how a ring might sit."
 ><meta
   name="twitter:card"
   content="summary_large_image"
 >
 <meta
   name="twitter:title"
-  content="Speak with Rich"
+  content="Try a ring"
 >
 <meta
   name="twitter:description"
-  content="Start a conversation about a stone, a piece or a question."
+  content="Swap the setting, stone and hand size to see how a ring might sit."
 >
 
 <title>
-  Speak with Rich &ndash; Gems by Rich</title>
+  Try a ring &ndash; Gems by Rich</title>
 
 <link
   rel="canonical"
-  href="/gems-by-rich-preview/pages/contact"
+  href="/gems-by-rich-preview/pages/ring-visualiser"
 >
 
 
   <meta
     name="description"
-    content="Start a conversation about a stone, a piece or a question."
+    content="Swap the setting, stone and hand size to see how a ring might sit."
   >
 
 
@@ -108,10 +108,62 @@
 
 </div>
 
-    <main id="MainContent" tabindex="-1"><div class="shopify-section " id="shopify-section-enquiry">
+    <main id="MainContent" tabindex="-1"><div class="shopify-section " id="shopify-section-visualiser">
+
+<script type="importmap">{"imports":{"three":"/assets/three.module.min.js","ring-model":"/assets/ring-model.js"}}</script>
+<section class="visualiser section-space" aria-labelledby="VisualiserTitle-visualiser">
+  <div class="section-title">
+    <h1 id="VisualiserTitle-visualiser">Try a ring</h1>
+    <p>Swap the setting, stone and hand size to see how a ring might sit.</p>
+  </div>
+  <ring-visualiser class="visualiser__app" data-finger-x="43.9" data-finger-y="58.5" data-finger-width="12.4" data-finger-angle="-4">
+    <div class="visualiser__stage" data-stage>
+      <img class="visualiser__photo" data-hand-photo src="/gems-by-rich-preview/assets/stock-hand.jpg" width="1400" height="1750" alt="A hand seen from above, palm down, against a dark background" crossorigin="anonymous">
+      <canvas class="visualiser__canvas" aria-label="Three-dimensional ring preview. Drag to turn the ring." role="img"></canvas>
+      <div class="visualiser__views" role="group" aria-label="View">
+        <button type="button" class="visualiser__view" data-view="hand" aria-pressed="true">On the hand</button>
+        <button type="button" class="visualiser__view" data-view="closeup" aria-pressed="false">Close up</button>
+      </div>
+      <p class="visualiser__hint small" aria-hidden="true">Drag to turn the ring</p>
+      <p class="visualiser__fallback small" data-fallback-note hidden>The three-dimensional preview needs WebGL. Your choices below still build a summary you can send to Rich.</p>
+    </div>
+    <form class="visualiser__controls" onsubmit="return false">
+      <div class="visualiser__group">
+        <p class="caps" id="VisShape-visualiser">Stone shape</p>
+        <div class="visualiser__options visualiser__options--shapes" role="radiogroup" aria-labelledby="VisShape-visualiser" data-options="shape"></div>
+      </div>
+      <div class="visualiser__group">
+        <label class="caps" for="VisCarat-visualiser">Carat weight</label>
+        <input class="visualiser__range" id="VisCarat-visualiser" type="range" data-carat min="0.3" max="5" step="0.05" value="1">
+        <p class="visualiser__readout" data-carat-readout aria-live="polite">1.00 ct</p>
+      </div>
+      <div class="visualiser__group">
+        <p class="caps" id="VisSetting-visualiser">Setting</p>
+        <div class="visualiser__options" role="radiogroup" aria-labelledby="VisSetting-visualiser" data-options="setting"></div>
+      </div>
+      <div class="visualiser__group">
+        <p class="caps" id="VisMetal-visualiser">Metal</p>
+        <div class="visualiser__options visualiser__options--metals" role="radiogroup" aria-labelledby="VisMetal-visualiser" data-options="metal"></div>
+      </div>
+      <div class="visualiser__group">
+        <p class="caps" id="VisSize-visualiser">Hand size</p>
+        <div class="visualiser__options" role="radiogroup" aria-labelledby="VisSize-visualiser" data-options="size"></div>
+        <p class="small">The same photograph is scaled to each ring size, so a larger hand makes the same stone look smaller.</p>
+      </div>
+      <div class="visualiser__summary">
+        <p class="small" data-summary></p>
+        <button type="button" class="button" data-attach>Ask Rich about this</button>
+      </div>
+    </form>
+  </ring-visualiser>
+  <p class="small visualiser__note">Illustrative proportions and generic settings, over a stock photograph. Not a quotation or a specific stone.</p>
+</section>
+<script type="module" src="/gems-by-rich-preview/assets/ring-visualiser.js"></script>
+
+</div><div class="shopify-section " id="shopify-section-enquiry">
 <section class="enquiry full-width" id="enquire" aria-labelledby="EnquiryTitle-enquiry">
   <div class="enquiry__inner">
-    <div class="enquiry__intro"><h2 id="EnquiryTitle-enquiry">Speak with Rich</h2><p>A stone, a piece or a question. Tell Rich what brought you here.</p>
+    <div class="enquiry__intro"><h2 id="EnquiryTitle-enquiry">Ask Rich about this ring</h2><p>Attach the ring you built and tell Rich what you have in mind.</p>
 
 </div>
     <form data-preview-form action="/gems-by-rich-preview/__preview/form-disabled" method="post" id="Enquiry-enquiry" class="enquiry-form">
@@ -133,33 +185,6 @@
         <div class="enquiry-form__bottom"><p>Just a conversation.<br>No commitment, no pressure.</p><button class="button" type="submit" disabled title="Design preview: enquiries are not sent">Send enquiry</button></div>
       
     <p class="preview-form-note">Design preview. Enquiries are not sent.</p></form>
-  </div>
-</section>
-
-</div><div class="shopify-section " id="shopify-section-questions"><section class="questions section-space" aria-labelledby="QuestionsTitle-questions">
-  <div><h2 id="QuestionsTitle-questions">Common questions</h2></div>
-  <div class="questions__list">
-    
-      <details class="question" >
-        <summary>Do I need to know exactly what I want?<span aria-hidden="true">+</span></summary>
-        <div class="rich-text"><p>Not at all. A favourite colour, an occasion or even a feeling is a lovely place to start. Rich can help you explore the possibilities.</p></div>
-      </details>
-    
-      <details class="question" >
-        <summary>Can I buy a gem directly on the website?<span aria-hidden="true">+</span></summary>
-        <div class="rich-text"><p>Every enquiry starts with a conversation. Rich will discuss the stone, confirm its availability and talk you through the next steps before you decide.</p></div>
-      </details>
-    
-      <details class="question" >
-        <summary>Can I start with a budget?<span aria-hidden="true">+</span></summary>
-        <div class="rich-text"><p>Of course. Share a range you feel comfortable with, alongside the colours, shapes or designs you love. That gives Rich a useful starting point for your search.</p></div>
-      </details>
-    
-      <details class="question" >
-        <summary>Can I bring my own ideas for a piece?<span aria-hidden="true">+</span></summary>
-        <div class="rich-text"><p>Yes. A sketch, a reference image or a story behind the occasion can help start the design conversation. Rich will explore the possibilities with you.</p></div>
-      </details>
-    
   </div>
 </section>
 
