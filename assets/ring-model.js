@@ -45,11 +45,7 @@ export function stoneDimensions(shape, carat) {
   const width = Math.sqrt(area / (profile.fill * profile.ratio)) * depthAdjust;
   const length = width * profile.ratio;
   const depth = width * profile.depth;
-  return {
-    length: round(length),
-    width: round(width),
-    depth: round(depth),
-  };
+  return { length: round(length), width: round(width), depth: round(depth) };
 }
 
 const round = (n) => Math.round(n * 100) / 100;
@@ -139,37 +135,117 @@ const OUTLINES = {
   Asscher: () => cutCorners(1, 1, 0.34),
   Marquise: (s) =>
     ring(s, (t) => {
-      // Two circular arcs meeting at points top and bottom.
       const y = Math.sin(t);
       const x = Math.cos(t) * (1 - Math.abs(y) ** 1.6);
       return [x, y * 2];
     }),
   Pear: (s) =>
     ring(s, (t) => {
-      // Round at the bottom, tapering to a point at the top.
       const y = Math.sin(t);
       const taper = y > 0 ? 1 - y ** 1.35 : 1;
       return [Math.cos(t) * Math.max(taper, 0.001), y * 1.5 + (y > 0 ? 0.35 * y : 0)];
     }),
   Heart: (s) =>
     ring(s, (t) => {
-      // Classic heart curve, rotated so the point faces down the finger.
       const x = 16 * Math.sin(t) ** 3;
-      const y =
-        13 * Math.cos(t) -
-        5 * Math.cos(2 * t) -
-        2 * Math.cos(3 * t) -
-        Math.cos(4 * t);
+      const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
       return [x, y];
     }),
 };
 
-// Hand sizes as ring sizes. Inner diameters follow the standard UK/US charts.
-export const RING_SIZES = [
-  { id: "small", label: "Small (UK J / US 5)", diameter: 15.9 },
-  { id: "medium", label: "Medium (UK M / US 6½)", diameter: 16.5 },
-  { id: "large", label: "Large (UK P / US 8)", diameter: 18.1 },
+/* Hands */
+
+// Three measurements describe the hand: length from the wrist crease to the
+// tip of the middle finger, span from thumb tip to little fingertip with the
+// hand spread, and the width of the ring finger where a ring sits.
+export const HAND_RANGE = {
+  length: { min: 150, max: 230 },
+  span: { min: 160, max: 260 },
+  finger: { min: 14, max: 22 },
+};
+
+export const HAND_PRESETS = [
+  { id: "small", label: "Small", length: 165, span: 185, finger: 15.6 },
+  { id: "medium", label: "Medium", length: 180, span: 205, finger: 16.8 },
+  { id: "large", label: "Large", length: 198, span: 228, finger: 18.4 },
 ];
+
+export const HAND_TONES = [
+  { id: "porcelain", label: "Porcelain", color: "#e9e4dc" },
+  { id: "warm", label: "Warm", color: "#d9a98c" },
+  { id: "deep", label: "Deep", color: "#6e4a34" },
+  { id: "graphite", label: "Graphite", color: "#2b2b2b" },
+];
+
+// Inner diameter in millimetres for common UK and US ring sizes.
+export const RING_SIZE_TABLE = [
+  { uk: "H", us: "4", diameter: 14.9 },
+  { uk: "I", us: "4½", diameter: 15.3 },
+  { uk: "J", us: "5", diameter: 15.7 },
+  { uk: "K", us: "5½", diameter: 16.1 },
+  { uk: "L", us: "6", diameter: 16.5 },
+  { uk: "M", us: "6½", diameter: 16.9 },
+  { uk: "N", us: "7", diameter: 17.3 },
+  { uk: "O", us: "7½", diameter: 17.7 },
+  { uk: "P", us: "8", diameter: 18.1 },
+  { uk: "Q", us: "8½", diameter: 18.5 },
+  { uk: "R", us: "9", diameter: 18.9 },
+  { uk: "S", us: "9½", diameter: 19.4 },
+  { uk: "T", us: "10", diameter: 19.8 },
+  { uk: "U", us: "10½", diameter: 20.2 },
+  { uk: "V", us: "11", diameter: 20.6 },
+];
+
+// The ring size whose inner diameter is nearest a finger width.
+export function ringSizeFor(fingerWidth) {
+  return RING_SIZE_TABLE.reduce((best, size) =>
+    Math.abs(size.diameter - fingerWidth) < Math.abs(best.diameter - fingerWidth) ? size : best,
+  );
+}
+
+// Everything the renderer needs to build a left hand, palm down, from the
+// three measurements. Fingers are listed little to index, thumb separately.
+// x runs across the hand (index side positive), y towards the fingertips.
+export function handProportions({ length, span, finger }) {
+  const middle = length * 0.44;
+  const palmLength = length - middle;
+  const breadth = span * 0.4;
+  const spreadFactor = clamp((span / length - 0.95) / 0.3, 0.35, 1.6);
+  const fingers = [
+    { id: "little", length: middle * 0.75, width: finger * 0.86, x: -0.36, spread: -14 },
+    { id: "ring", length: middle * 0.95, width: finger, x: -0.12, spread: -5 },
+    { id: "middle", length: middle, width: finger * 1.04, x: 0.12, spread: 2 },
+    { id: "index", length: middle * 0.92, width: finger * 1.0, x: 0.36, spread: 10 },
+  ].map((f) => ({
+    ...f,
+    length: round(f.length),
+    width: round(f.width),
+    base: { x: round(f.x * breadth), y: round(palmLength - Math.abs(f.x) * breadth * 0.18) },
+    spread: round(f.spread * spreadFactor),
+    segments: [0.42, 0.31, 0.27].map((s) => round(s * f.length)),
+  }));
+  return {
+    length,
+    span,
+    palmLength: round(palmLength),
+    breadth: round(breadth),
+    wristWidth: round(breadth * 0.82),
+    thickness: round(clamp(finger * 1.35, 18, 32)),
+    fingers,
+    thumb: {
+      length: round(middle * 0.78),
+      width: round(finger * 1.25),
+      base: { x: round(breadth * 0.5), y: round(palmLength * 0.28) },
+      angle: round(38 + 22 * spreadFactor),
+      segments: [0.55, 0.45].map((s) => round(s * middle * 0.78)),
+    },
+    ringSize: ringSizeFor(finger),
+  };
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/* Settings, metals, state */
 
 export const SETTINGS = [
   { id: "solitaire", label: "Solitaire", prongs: 4, halo: false, sideStones: 0, bezel: false, pave: false },
@@ -188,7 +264,16 @@ export const METALS = [
 
 export const CARAT_RANGE = { min: 0.3, max: 5, step: 0.05 };
 
-const DEFAULT_STATE = { setting: "solitaire", shape: "Round", carat: 1, metal: "yellow", size: "medium" };
+const DEFAULT_STATE = {
+  setting: "solitaire",
+  shape: "Round",
+  carat: 1,
+  metal: "yellow",
+  tone: "porcelain",
+  length: 180,
+  span: 205,
+  finger: 16.8,
+};
 
 export function parseState(params) {
   const state = { ...DEFAULT_STATE };
@@ -198,8 +283,17 @@ export function parseState(params) {
   if (SHAPES.includes(shape)) state.shape = shape;
   const metal = params.get("metal");
   if (METALS.some((m) => m.id === metal)) state.metal = metal;
-  const size = params.get("size");
-  if (RING_SIZES.some((r) => r.id === size)) state.size = size;
+  const tone = params.get("tone");
+  if (HAND_TONES.some((t) => t.id === tone)) state.tone = tone;
+  const preset = HAND_PRESETS.find((p) => p.id === params.get("hand"));
+  if (preset) Object.assign(state, { length: preset.length, span: preset.span, finger: preset.finger });
+  for (const key of ["length", "span", "finger"]) {
+    const value = Number.parseFloat(params.get(key));
+    if (Number.isFinite(value)) {
+      const { min, max } = HAND_RANGE[key];
+      state[key] = Math.round(clamp(value, min, max) * 10) / 10;
+    }
+  }
   const carat = Number.parseFloat(params.get("carat"));
   if (Number.isFinite(carat)) {
     state.carat = Math.min(CARAT_RANGE.max, Math.max(CARAT_RANGE.min, Math.round(carat * 100) / 100));
@@ -207,15 +301,23 @@ export function parseState(params) {
   return state;
 }
 
+// The preset the current measurements match, if any.
+export function matchingPreset(state) {
+  return HAND_PRESETS.find(
+    (p) => p.length === state.length && p.span === state.span && Math.abs(p.finger - state.finger) < 0.05,
+  );
+}
+
 export function describeRing(state) {
   const setting = SETTINGS.find((s) => s.id === state.setting) || SETTINGS[0];
   const metal = METALS.find((m) => m.id === state.metal) || METALS[0];
-  const size = RING_SIZES.find((r) => r.id === state.size) || RING_SIZES[1];
   const dims = stoneDimensions(state.shape, state.carat);
+  const size = ringSizeFor(state.finger);
   return (
     `${setting.label} setting; ${state.carat.toFixed(2)} ct ${state.shape} ` +
     `(about ${dims.length.toFixed(1)} × ${dims.width.toFixed(1)} mm); ` +
-    `${metal.label.toLowerCase()}; ring size ${size.label}. ` +
+    `${metal.label.toLowerCase()}; ring finger ${state.finger.toFixed(1)} mm wide ` +
+    `(about UK ${size.uk} / US ${size.us}); hand ${(state.length / 10).toFixed(1)} cm long, ${(state.span / 10).toFixed(1)} cm span. ` +
     "Built in the ring visualiser with illustrative proportions, not a quotation or a specific stone."
   );
 }

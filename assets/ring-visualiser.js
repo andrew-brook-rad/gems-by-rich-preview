@@ -1,20 +1,26 @@
-// Ring visualiser: a procedural 3D ring drawn over a calibrated hand
-// photograph. Units are millimetres. See docs/superpowers/specs/2026-09-09-ring-visualiser-design.md
+// Ring visualiser: a procedural ring on a procedural hand, both built from
+// measurements in millimetres. See docs/superpowers/specs/2026-09-09-ring-visualiser-design.md
 import * as THREE from "three";
 import {
   CARAT_RANGE,
+  HAND_PRESETS,
+  HAND_RANGE,
+  HAND_TONES,
   METALS,
-  RING_SIZES,
   SETTINGS,
   SHAPES,
   describeRing,
+  handProportions,
+  matchingPreset,
   outline,
   parseState,
+  ringSizeFor,
   stoneDimensions,
 } from "ring-model";
 
 const BAND_TUBE = 0.9; // half the band thickness
 const BAND_WIDTH = 2.1; // along the finger
+const DEG = Math.PI / 180;
 
 class RingVisualiser extends HTMLElement {
   connectedCallback() {
@@ -22,15 +28,9 @@ class RingVisualiser extends HTMLElement {
     this.started = true;
     this.state = parseState(new URLSearchParams(location.search));
     this.view = "hand";
-    this.rotation = { x: 0, y: 0 };
-    this.calibration = {
-      x: Number(this.dataset.fingerX) / 100,
-      y: Number(this.dataset.fingerY) / 100,
-      width: Number(this.dataset.fingerWidth) / 100,
-      angle: (Number(this.dataset.fingerAngle) * Math.PI) / 180,
-    };
+    this.orbit = { azimuth: 2.75, polar: 0.72, distance: 260 };
+    this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.stage = this.querySelector("[data-stage]");
-    this.photo = this.querySelector("[data-hand-photo]");
     this.buildControls();
     this.reflectControls();
     try {
@@ -39,9 +39,9 @@ class RingVisualiser extends HTMLElement {
       this.showFallback();
       return;
     }
-    this.buildRing();
+    this.rebuild();
     this.bindInteraction();
-    this.requestRender();
+    this.startLoop();
   }
 
   /* Controls */
@@ -50,33 +50,37 @@ class RingVisualiser extends HTMLElement {
     const groups = {
       shape: SHAPES.map((s) => [s, s]),
       setting: SETTINGS.map((s) => [s.id, s.label]),
-      metal: METALS.map((m) => [m.id, m.label]),
-      size: RING_SIZES.map((r) => [r.id, r.label]),
+      metal: METALS.map((m) => [m.id, m.label, m.color]),
+      tone: HAND_TONES.map((t) => [t.id, t.label, t.color]),
+      hand: HAND_PRESETS.map((p) => [p.id, p.label]),
     };
     for (const [key, options] of Object.entries(groups)) {
       const host = this.querySelector(`[data-options="${key}"]`);
       if (!host) continue;
       host.innerHTML = options
         .map(
-          ([value, label]) =>
+          ([value, label, swatch]) =>
             `<button type="button" role="radio" data-set="${key}" data-value="${value}" aria-checked="false"${
-              key === "metal" ? ` style="--swatch:${METALS.find((m) => m.id === value).color}"` : ""
+              swatch ? ` style="--swatch:${swatch}"` : ""
             }>${label}</button>`,
         )
         .join("");
     }
     const carat = this.querySelector("[data-carat]");
-    if (carat) {
-      carat.min = CARAT_RANGE.min;
-      carat.max = CARAT_RANGE.max;
-      carat.step = CARAT_RANGE.step;
+    if (carat) Object.assign(carat, { min: CARAT_RANGE.min, max: CARAT_RANGE.max, step: CARAT_RANGE.step });
+    for (const key of ["length", "span", "finger"]) {
+      const input = this.querySelector(`[data-measure="${key}"]`);
+      if (input) Object.assign(input, { min: HAND_RANGE[key].min, max: HAND_RANGE[key].max, step: key === "finger" ? 0.1 : 1 });
     }
     this.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-set], button[data-view], button[data-attach]");
       if (!button) return;
-      if (button.dataset.set) {
-        const key = button.dataset.set;
-        this.state[key] = key === "carat" ? Number(button.dataset.value) : button.dataset.value;
+      if (button.dataset.set === "hand") {
+        const preset = HAND_PRESETS.find((p) => p.id === button.dataset.value);
+        Object.assign(this.state, { length: preset.length, span: preset.span, finger: preset.finger });
+        this.update();
+      } else if (button.dataset.set) {
+        this.state[button.dataset.set] = button.dataset.value;
         this.update();
       } else if (button.dataset.view) {
         this.setView(button.dataset.view);
@@ -85,26 +89,38 @@ class RingVisualiser extends HTMLElement {
       }
     });
     this.addEventListener("input", (event) => {
-      if (event.target.matches("[data-carat]")) {
-        this.state.carat = Math.round(Number(event.target.value) * 100) / 100;
+      const target = event.target;
+      if (target.matches("[data-carat]")) {
+        this.state.carat = Math.round(Number(target.value) * 100) / 100;
+        this.update();
+      } else if (target.matches("[data-measure]")) {
+        this.state[target.dataset.measure] = Math.round(Number(target.value) * 10) / 10;
         this.update();
       }
     });
   }
 
   reflectControls() {
-    for (const key of ["shape", "setting", "metal", "size"]) {
+    const preset = matchingPreset(this.state);
+    for (const key of ["shape", "setting", "metal", "tone", "hand"]) {
       this.querySelectorAll(`[data-set="${key}"]`).forEach((button) => {
-        button.setAttribute("aria-checked", String(button.dataset.value === this.state[key]));
+        const current = key === "hand" ? preset?.id : this.state[key];
+        button.setAttribute("aria-checked", String(button.dataset.value === current));
       });
     }
     const carat = this.querySelector("[data-carat]");
     if (carat && Number(carat.value) !== this.state.carat) carat.value = this.state.carat;
     const dims = stoneDimensions(this.state.shape, this.state.carat);
-    const readout = this.querySelector("[data-carat-readout]");
-    if (readout) readout.textContent = `${this.state.carat.toFixed(2)} ct · about ${dims.length.toFixed(1)} × ${dims.width.toFixed(1)} mm`;
-    const summary = this.querySelector("[data-summary]");
-    if (summary) summary.textContent = describeRing(this.state);
+    setText(this, "[data-carat-readout]", `${this.state.carat.toFixed(2)} ct · about ${dims.length.toFixed(1)} × ${dims.width.toFixed(1)} mm`);
+    for (const key of ["length", "span", "finger"]) {
+      const input = this.querySelector(`[data-measure="${key}"]`);
+      if (input && Number(input.value) !== this.state[key]) input.value = this.state[key];
+    }
+    const size = ringSizeFor(this.state.finger);
+    setText(this, "[data-readout=length]", `${(this.state.length / 10).toFixed(1)} cm`);
+    setText(this, "[data-readout=span]", `${(this.state.span / 10).toFixed(1)} cm`);
+    setText(this, "[data-readout=finger]", `${this.state.finger.toFixed(1)} mm · about UK ${size.uk} / US ${size.us}`);
+    setText(this, "[data-summary]", describeRing(this.state));
     this.querySelectorAll("[data-view]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.view === this.view));
     });
@@ -116,7 +132,7 @@ class RingVisualiser extends HTMLElement {
   update() {
     this.reflectControls();
     if (this.renderer) {
-      this.buildRing();
+      this.rebuild();
       this.requestRender();
     }
   }
@@ -129,152 +145,146 @@ class RingVisualiser extends HTMLElement {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
-    this.renderer.localClippingEnabled = true;
+    this.renderer.toneMappingExposure = 1.0;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x111111);
+    this.scene.background = new THREE.Color(0x141414);
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(roomEnvironment(), 0.04).texture;
+    this.scene.environment = pmrem.fromScene(studioEnvironment(), 0.02).texture;
     pmrem.dispose();
-    this.camera = new THREE.PerspectiveCamera(20, 1, 1, 4000);
-    // The orient group follows the finger's angle in the photograph; the ring
-    // group inside it carries the visitor's drag rotation.
-    this.orient = new THREE.Group();
-    this.orient.rotation.z = this.calibration.angle;
-    this.scene.add(this.orient);
-    this.ringGroup = new THREE.Group();
-    this.orient.add(this.ringGroup);
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(-60, 120, 220);
+    this.camera = new THREE.PerspectiveCamera(28, 1, 1, 3000);
+    this.world = new THREE.Group();
+    this.scene.add(this.world);
+    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    key.position.set(-120, 260, 160);
     this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.5);
-    fill.position.set(120, -40, 160);
-    this.scene.add(fill);
-    this.clip = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.6);
-    this.buildHandPlane();
+    const rim = new THREE.DirectionalLight(0xffffff, 0.6);
+    rim.position.set(160, 120, -220);
+    this.scene.add(rim);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+    this.glintLights = STUDIO_LIGHT_DIRECTIONS.map((d) => new THREE.Vector3(...d).normalize());
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.stage);
     this.resize();
   }
 
-  buildHandPlane() {
-    const loader = new THREE.TextureLoader();
-    loader.load(this.photo.currentSrc || this.photo.src, (texture) => {
-      texture.colorSpace = THREE.SRGBColorSpace;
-      const image = texture.image;
-      this.handAspect = image.height / image.width;
-      this.handTexture = texture;
-      const geometry = new THREE.PlaneGeometry(1, this.handAspect);
-      this.handPlane = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture }));
-      this.scene.add(this.handPlane);
-      this.photo.hidden = true;
-      this.layoutHand();
-      this.requestRender();
+  rebuild() {
+    disposeChildren(this.world);
+    this.buildHand();
+    this.frameCamera();
+  }
+
+  /* Hand */
+
+  buildHand() {
+    const p = handProportions(this.state);
+    const tone = HAND_TONES.find((t) => t.id === this.state.tone) || HAND_TONES[0];
+    const skin = new THREE.MeshPhysicalMaterial({
+      color: tone.color,
+      roughness: 0.62,
+      metalness: 0,
+      sheen: 0.6,
+      sheenRoughness: 0.7,
+      sheenColor: new THREE.Color(0xffffff),
+      clearcoat: 0.06,
+      clearcoatRoughness: 0.5,
     });
-  }
-
-  // Scale the photograph so the calibrated finger width equals the chosen ring's inner diameter.
-  layoutHand() {
-    if (!this.handPlane) return;
-    const size = RING_SIZES.find((r) => r.id === this.state.size) || RING_SIZES[1];
-    const mmPerImageWidth = size.diameter / this.calibration.width;
-    const planeW = mmPerImageWidth;
-    const planeH = planeW * this.handAspect;
-    this.handPlane.scale.set(planeW, planeH, 1);
-    // Finger base at the origin: shift the plane so that point lands on (0, 0).
-    this.handPlane.position.set(
-      (0.5 - this.calibration.x) * planeW,
-      (this.calibration.y - 0.5) * planeH,
-      -BAND_TUBE - 0.2,
-    );
-    this.handPlane.rotation.z = 0;
-    this.handPlane.visible = this.view === "hand";
-    this.planeH = planeH;
-    this.frameCamera();
-  }
-
-  frameCamera() {
-    const aspect = this.stage.clientWidth / Math.max(1, this.stage.clientHeight);
-    this.camera.aspect = aspect;
-    const fov = (this.camera.fov * Math.PI) / 180;
-    if (this.view === "hand" && this.planeH) {
-      // Frame a window around the ring finger: about 78 mm tall, centred a
-      // little above the ring so the finger and knuckles give scale.
-      const windowH = 78;
-      const windowW = windowH * aspect;
-      const distance = Math.max(windowH, windowW / aspect) / 2 / Math.tan(fov / 2);
-      this.camera.position.set(0, 10, distance);
-      this.camera.lookAt(0, 10, 0);
-    } else {
-      const size = RING_SIZES.find((r) => r.id === this.state.size) || RING_SIZES[1];
-      const span = size.diameter + 2 * BAND_TUBE + 6;
-      const distance = span / 2 / Math.tan(fov / 2) / Math.min(1, aspect) * 1.15;
-      this.camera.position.set(0, 0, distance);
-      this.camera.lookAt(0, 0, 0);
+    const hand = new THREE.Group();
+    this.world.add(hand);
+    // Palm: a rounded slab between the wrist (z = 0) and the knuckles (z = -palmLength).
+    hand.add(new THREE.Mesh(palmGeometry(p), skin));
+    // Wrist stub for context.
+    const wrist = new THREE.Mesh(new THREE.CapsuleGeometry(p.wristWidth / 2 - 2, 40, 6, 20), skin);
+    wrist.rotation.x = Math.PI / 2;
+    wrist.scale.z = (p.thickness / 2 + 1) / (p.wristWidth / 2 - 2);
+    wrist.position.set(0, -0.5, 26);
+    hand.add(wrist);
+    // Fingers: little to index, each three segments, slightly spread and curled.
+    for (const f of p.fingers) {
+      const base = new THREE.Group();
+      base.position.set(f.base.x, p.thickness * 0.08, -f.base.y);
+      base.rotation.y = -f.spread * DEG;
+      hand.add(base);
+      let parent = base;
+      const curls = [7, 13, 9];
+      f.segments.forEach((len, i) => {
+        const seg = new THREE.Group();
+        seg.rotation.x = -curls[i] * DEG;
+        parent.add(seg);
+        const radius = (f.width / 2) * [1, 0.93, 0.85][i];
+        const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(1, len - radius * 0.6), 6, 24), skin);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.scale.z = 0.86; // fingers are a little flatter than round
+        mesh.position.z = -len / 2;
+        seg.add(mesh);
+        if (f.id === "ring" && i === 0) {
+          this.ringMount = new THREE.Group();
+          this.ringMount.position.z = -len * 0.56;
+          this.ringMount.rotation.x = -Math.PI / 2;
+          seg.add(this.ringMount);
+          this.buildRing(f.width / 2 + 0.35);
+        }
+        const next = new THREE.Group();
+        next.position.z = -len;
+        seg.add(next);
+        parent = next;
+      });
     }
-    this.camera.updateProjectionMatrix();
+    // Thumb: two segments, out to the side and forward.
+    const t = p.thumb;
+    const thumb = new THREE.Group();
+    thumb.position.set(t.base.x, p.thickness * 0.05, -t.base.y);
+    thumb.rotation.order = "YXZ";
+    thumb.rotation.y = -t.angle * DEG;
+    thumb.rotation.x = -22 * DEG;
+    hand.add(thumb);
+    let parent = thumb;
+    t.segments.forEach((len, i) => {
+      const seg = new THREE.Group();
+      seg.rotation.x = -[10, 18][i] * DEG;
+      parent.add(seg);
+      const radius = (t.width / 2) * [1, 0.9][i];
+      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(1, len - radius * 0.6), 6, 24), skin);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.scale.z = 0.85;
+      mesh.position.z = -len / 2;
+      seg.add(mesh);
+      const next = new THREE.Group();
+      next.position.z = -len;
+      seg.add(next);
+      parent = next;
+    });
+    this.hand = hand;
+    this.handLength = p.length;
   }
 
-  resize() {
-    const w = this.stage.clientWidth;
-    const h = this.stage.clientHeight;
-    if (!w || !h) return;
-    this.renderer.setSize(w, h, false);
-    this.frameCamera();
-    this.requestRender();
-  }
+  /* Ring, built z-up inside ringMount (which is rotated onto the finger) */
 
-  setView(view) {
-    this.view = view;
-    this.ringGroup.rotation.set(0, 0, 0);
-    this.rotation = { x: 0, y: 0 };
-    this.scene.background.set(view === "hand" ? 0x111111 : 0x0e0e0e);
-    this.orient.rotation.z = view === "hand" ? this.calibration.angle : 0;
-    if (this.handPlane) this.handPlane.visible = view === "hand";
-    this.buildRing();
-    this.frameCamera();
-    this.reflectControls();
-    this.requestRender();
-  }
-
-  /* Ring */
-
-  buildRing() {
-    disposeChildren(this.ringGroup);
+  buildRing(innerRadius) {
     const state = this.state;
-    const size = RING_SIZES.find((r) => r.id === state.size) || RING_SIZES[1];
     const setting = SETTINGS.find((s) => s.id === state.setting) || SETTINGS[0];
     const metalDef = METALS.find((m) => m.id === state.metal) || METALS[0];
     const dims = stoneDimensions(state.shape, state.carat);
-    const R = size.diameter / 2; // inner radius
-    const clipping = this.view === "hand" ? [this.clip] : [];
-    const metal = new THREE.MeshStandardMaterial({
-      color: metalDef.color,
-      metalness: 1,
-      roughness: 0.24,
-      envMapIntensity: 1.3,
-      clippingPlanes: clipping,
-    });
+    const R = innerRadius;
+    const metal = new THREE.MeshStandardMaterial({ color: metalDef.color, metalness: 1, roughness: 0.2, envMapIntensity: 1.4 });
     const stone = stoneMaterial(dims.depth);
     const accent = stoneMaterial(1.2);
+    const mount = this.ringMount;
 
-    // Band: a torus around the finger axis (Y), flattened along the finger.
     const band = new THREE.Mesh(new THREE.TorusGeometry(R + BAND_TUBE, BAND_TUBE, 24, 96), metal);
     band.rotation.x = Math.PI / 2;
     band.scale.y = BAND_WIDTH / (2 * BAND_TUBE);
-    this.ringGroup.add(band);
+    mount.add(band);
 
-    const outer = R + 2 * BAND_TUBE; // top surface of the band
+    const outer = R + 2 * BAND_TUBE;
     const crownH = dims.width * 0.16;
     const pavilionH = dims.depth - crownH;
     const head = new THREE.Group();
-    // The pavilion sinks partly into the head so the stone sits low on the band.
     head.position.z = outer + pavilionH * 0.55;
-    this.ringGroup.add(head);
+    mount.add(head);
 
-    // Centre stone
-    const centre = new THREE.Mesh(stoneGeometry(state.shape, dims, 32), stone);
-    head.add(centre);
+    const centreGeometry = stoneGeometry(state.shape, dims, 32);
+    head.add(new THREE.Mesh(centreGeometry, stone));
+    head.add(glints(centreGeometry, this.glintLights, dims.width * 0.9));
 
     if (setting.bezel) {
       head.add(new THREE.Mesh(rimGeometry(state.shape, dims, 1.09, 0.55), metal));
@@ -290,8 +300,8 @@ class RingVisualiser extends HTMLElement {
         head.add(prong);
       }
       head.add(new THREE.Mesh(rimGeometry(state.shape, dims, 0.98, 0.34, -pavilionH * 0.5), metal));
-      // A collar joining the head to the band.
-      const collar = new THREE.Mesh(new THREE.CylinderGeometry(Math.min(dims.width, dims.length) * 0.22, Math.min(dims.width, dims.length) * 0.3, pavilionH * 0.55 + 0.3, 16), metal);
+      const small = Math.min(dims.width, dims.length);
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(small * 0.22, small * 0.3, pavilionH * 0.55 + 0.3, 16), metal);
       collar.rotation.x = Math.PI / 2;
       collar.position.z = -pavilionH * 0.5 - (pavilionH * 0.55 + 0.3) / 2 + 0.2;
       head.add(collar);
@@ -302,7 +312,8 @@ class RingVisualiser extends HTMLElement {
       const count = Math.max(14, Math.round((dims.length + dims.width) * 1.6));
       for (let i = 0; i < count; i++) {
         const [px, py] = ringPoints[Math.floor((i / count) * ringPoints.length)];
-        const small = new THREE.Mesh(stoneGeometry("Round", { length: 1.3, width: 1.3, depth: 0.8 }, 12), accent);
+        const g = stoneGeometry("Round", { length: 1.3, width: 1.3, depth: 0.8 }, 12);
+        const small = new THREE.Mesh(g, accent);
         small.position.set(px * (dims.width + 2.2), py * (dims.length + 2.2), crownH * 0.2);
         head.add(small);
       }
@@ -314,10 +325,11 @@ class RingVisualiser extends HTMLElement {
       const offset = dims.width / 2 + side.width / 2 + 0.7;
       for (const dir of [-1, 1]) {
         const g = new THREE.Group();
-        const angle = Math.atan2(dir * offset, outer);
         g.position.set(dir * offset, 0, Math.sqrt(Math.max(0, outer * outer - offset * offset)) - outer);
-        g.rotation.y = angle;
-        g.add(new THREE.Mesh(stoneGeometry(state.shape, side, 24), stone));
+        g.rotation.y = Math.atan2(dir * offset, outer);
+        const sg = stoneGeometry(state.shape, side, 24);
+        g.add(new THREE.Mesh(sg, stone));
+        g.add(glints(sg, this.glintLights, side.width * 0.8));
         g.add(new THREE.Mesh(rimGeometry(state.shape, side, 1.0, 0.28, -side.depth * 0.4), metal));
         head.add(g);
       }
@@ -325,43 +337,116 @@ class RingVisualiser extends HTMLElement {
 
     if (setting.pave) {
       const radius = outer + 0.2;
-      const spacing = 1.45 / radius; // radians between 1.2 mm stones
+      const spacing = 1.45 / radius;
       const count = Math.floor(1.25 / spacing);
       for (let i = -count; i <= count; i++) {
         const theta = i * spacing;
-        if (Math.abs(theta) * radius < Math.max(dims.width, dims.length) * 0.55 + 1) continue; // leave room for the head
+        if (Math.abs(theta) * radius < Math.max(dims.width, dims.length) * 0.55 + 1) continue;
         const small = new THREE.Mesh(stoneGeometry("Round", { length: 1.2, width: 1.2, depth: 0.75 }, 10), accent);
         small.position.set(Math.sin(theta) * radius, 0, Math.cos(theta) * radius);
         small.rotation.y = theta;
-        this.ringGroup.add(small);
+        mount.add(small);
       }
     }
+  }
 
-    // Slight resting tilt so light catches the facets in the hand view.
-    this.ringGroup.rotation.x = this.rotation.x;
-    this.ringGroup.rotation.y = this.rotation.y;
+  /* Camera */
+
+  ringWorldPosition() {
+    const v = new THREE.Vector3();
+    this.world.updateMatrixWorld(true);
+    if (this.ringMount) this.ringMount.getWorldPosition(v);
+    return v;
+  }
+
+  frameCamera() {
+    const aspect = this.stage.clientWidth / Math.max(1, this.stage.clientHeight);
+    this.camera.aspect = aspect;
+    const target = this.ringWorldPosition();
+    if (this.view === "hand") {
+      this.orbit.distance = this.handLength * (aspect < 0.9 ? 1.6 : 1.25);
+      target.z += this.handLength * 0.08; // centre between knuckles and palm
+      target.x += this.handLength * 0.06; // and a little towards the thumb
+      target.y -= 4;
+    } else {
+      this.orbit.distance = 52;
+    }
+    this.target = target;
+    this.placeCamera();
+  }
+
+  placeCamera() {
+    const { azimuth, polar, distance } = this.orbit;
+    const t = this.target || new THREE.Vector3();
+    this.camera.position.set(
+      t.x + distance * Math.sin(polar) * Math.sin(azimuth),
+      t.y + distance * Math.cos(polar),
+      t.z + distance * Math.sin(polar) * Math.cos(azimuth),
+    );
+    this.camera.lookAt(t);
+    this.camera.updateProjectionMatrix();
+  }
+
+  resize() {
+    const w = this.stage.clientWidth;
+    const h = this.stage.clientHeight;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h, false);
+    this.frameCamera();
+    this.requestRender();
+  }
+
+  setView(view) {
+    this.view = view;
+    this.orbit.azimuth = view === "hand" ? 2.75 : 2.4;
+    this.orbit.polar = view === "hand" ? 0.72 : 0.8;
+    this.frameCamera();
+    this.reflectControls();
+    this.requestRender();
   }
 
   /* Interaction and rendering */
 
   bindInteraction() {
     let dragging = null;
-    const limit = () => (this.view === "hand" ? { x: 0.45, y: 0.6 } : { x: Math.PI, y: Math.PI });
     this.stage.addEventListener("pointerdown", (event) => {
-      dragging = { x: event.clientX, y: event.clientY, rx: this.rotation.x, ry: this.rotation.y };
+      dragging = { x: event.clientX, y: event.clientY, azimuth: this.orbit.azimuth, polar: this.orbit.polar };
+      this.dragging = true;
       this.stage.setPointerCapture(event.pointerId);
     });
     this.stage.addEventListener("pointermove", (event) => {
       if (!dragging) return;
-      const l = limit();
-      this.rotation.y = clamp(dragging.ry + (event.clientX - dragging.x) * 0.01, -l.y, l.y);
-      this.rotation.x = clamp(dragging.rx + (event.clientY - dragging.y) * 0.01, -l.x, l.x);
-      this.ringGroup.rotation.set(this.rotation.x, this.rotation.y, 0);
+      const limitAzimuth = this.view === "hand" ? 1.3 : Math.PI * 4;
+      this.orbit.azimuth = clamp(dragging.azimuth - (event.clientX - dragging.x) * 0.008, 2.75 - limitAzimuth, 2.75 + limitAzimuth);
+      this.orbit.polar = clamp(dragging.polar + (event.clientY - dragging.y) * 0.006, 0.2, this.view === "hand" ? 1.25 : 1.15);
+      this.placeCamera();
       this.requestRender();
     });
-    const stop = () => (dragging = null);
+    const stop = () => {
+      dragging = null;
+      this.dragging = false;
+    };
     this.stage.addEventListener("pointerup", stop);
     this.stage.addEventListener("pointercancel", stop);
+    this.visible = true;
+    new IntersectionObserver(([entry]) => {
+      this.visible = entry.isIntersecting;
+    }).observe(this.stage);
+  }
+
+  // A slow turn in the close-up view keeps the facets flashing; rendering
+  // otherwise happens only on demand.
+  startLoop() {
+    const tick = () => {
+      if (this.visible && !this.dragging && !this.reducedMotion && this.view === "closeup") {
+        this.orbit.azimuth += 0.004;
+        this.placeCamera();
+        this.renderer.render(this.scene, this.camera);
+        this.setAttribute("data-ready", "");
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }
 
   requestRender() {
@@ -394,12 +479,9 @@ class RingVisualiser extends HTMLElement {
       const option = [...interest.options].find((o) => /bespoke/i.test(o.textContent));
       if (option) interest.value = option.value;
     }
-    const summary = form.querySelector("[data-ring-brief-summary]");
-    if (summary) {
-      const setting = SETTINGS.find((s) => s.id === this.state.setting) || SETTINGS[0];
-      const metal = METALS.find((m) => m.id === this.state.metal) || METALS[0];
-      summary.textContent = `Ring attached: ${setting.label}, ${this.state.carat.toFixed(2)} ct ${this.state.shape}, ${metal.label.toLowerCase()}.`;
-    }
+    const setting = SETTINGS.find((s) => s.id === this.state.setting) || SETTINGS[0];
+    const metal = METALS.find((m) => m.id === this.state.metal) || METALS[0];
+    setText(form, "[data-ring-brief-summary]", `Ring attached: ${setting.label}, ${this.state.carat.toFixed(2)} ct ${this.state.shape}, ${metal.label.toLowerCase()}, finger ${this.state.finger.toFixed(1)} mm.`);
     const context = form.querySelector("[data-ring-brief-context]");
     if (context) context.hidden = false;
     document.querySelector("#enquire")?.scrollIntoView({ behavior: "smooth" });
@@ -407,22 +489,23 @@ class RingVisualiser extends HTMLElement {
   }
 }
 
-/* Geometry helpers */
+/* Materials and geometry */
 
 function stoneMaterial(thickness) {
   return new THREE.MeshPhysicalMaterial({
-    color: 0xf8f9ff,
+    color: 0xffffff,
     metalness: 0,
-    roughness: 0.02,
-    transmission: 0.45,
+    roughness: 0.0,
+    transmission: 0.28,
     thickness: Math.max(0.6, thickness),
     ior: 2.4,
-    envMapIntensity: 3.2,
+    envMapIntensity: 3.5,
     clearcoat: 1,
-    clearcoatRoughness: 0.02,
-    specularIntensity: 1.2,
-    iridescence: 0.25,
-    iridescenceIOR: 1.8,
+    clearcoatRoughness: 0,
+    specularIntensity: 1.5,
+    iridescence: 0.35,
+    iridescenceIOR: 1.9,
+    iridescenceThicknessRange: [200, 500],
   });
 }
 
@@ -443,19 +526,84 @@ function stoneGeometry(shape, dims, steps) {
   const n = points.length;
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    push(centre, table[i], table[j]); // table fan
-    push(table[i], girdleTop[i], girdleTop[j]); // crown facets
+    push(centre, table[i], table[j]);
+    push(table[i], girdleTop[i], girdleTop[j]);
     push(table[i], girdleTop[j], table[j]);
-    push(girdleTop[i], girdleBottom[i], girdleBottom[j]); // girdle
+    push(girdleTop[i], girdleBottom[i], girdleBottom[j]);
     push(girdleTop[i], girdleBottom[j], girdleTop[j]);
-    push(girdleBottom[i], breakRing[i], breakRing[j]); // upper pavilion
+    push(girdleBottom[i], breakRing[i], breakRing[j]);
     push(girdleBottom[i], breakRing[j], girdleBottom[j]);
-    push(breakRing[i], culet, breakRing[j]); // lower pavilion
+    push(breakRing[i], culet, breakRing[j]);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(tri, 3));
   geometry.computeVertexNormals();
   return geometry;
+}
+
+// Sparkle: one point per facet whose brightness follows the reflection of the
+// studio lights, drawn as an additive four-point star.
+function glints(geometry, lightDirections, size) {
+  const pos = geometry.getAttribute("position");
+  const centres = [];
+  const normals = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    n.copy(b).sub(a).cross(c.clone().sub(a)).normalize();
+    const centre = a.clone().add(b).add(c).multiplyScalar(1 / 3).addScaledVector(n, 0.05);
+    centres.push(centre.x, centre.y, centre.z);
+    normals.push(n.x, n.y, n.z);
+  }
+  const points = new THREE.BufferGeometry();
+  points.setAttribute("position", new THREE.Float32BufferAttribute(centres, 3));
+  points.setAttribute("facetNormal", new THREE.Float32BufferAttribute(normals, 3));
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      lights: { value: lightDirections },
+      baseSize: { value: size * 6 },
+    },
+    vertexShader: `
+      attribute vec3 facetNormal;
+      uniform vec3 lights[${lightDirections.length}];
+      uniform float baseSize;
+      varying float vAlpha;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vec3 n = normalize(mat3(modelMatrix) * facetNormal);
+        vec3 v = normalize(cameraPosition - wp.xyz);
+        vec3 r = reflect(-v, n);
+        float s = 0.0;
+        for (int i = 0; i < ${lightDirections.length}; i++) {
+          s = max(s, pow(max(dot(r, lights[i]), 0.0), 90.0));
+        }
+        s *= smoothstep(0.0, 0.25, dot(n, v));
+        vAlpha = s;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = baseSize * s * (240.0 / -mv.z);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying float vAlpha;
+      void main() {
+        vec2 p = gl_PointCoord * 2.0 - 1.0;
+        float r = length(p);
+        float star = pow(max(0.0, 1.0 - abs(p.x)), 7.0) + pow(max(0.0, 1.0 - abs(p.y)), 7.0);
+        float core = exp(-r * r * 7.0);
+        float a = clamp(core + 0.7 * star * max(0.0, 1.0 - r), 0.0, 1.0) * vAlpha;
+        if (a < 0.02) discard;
+        gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+      }`,
+  });
+  return new THREE.Points(points, material);
 }
 
 // A metal rim following the outline (bezel, gallery under the stone, halo base).
@@ -467,40 +615,87 @@ function rimGeometry(shape, dims, scale, tube, z = 0) {
   return new THREE.TubeGeometry(curve, 96, tube, 10, true);
 }
 
+// The palm as a rounded slab: a soft trapezoid from wrist to knuckles with a
+// thenar bulge on the thumb side, extruded with a bevel for rounded edges.
+function palmGeometry(p) {
+  const w0 = p.wristWidth / 2;
+  const w1 = p.breadth / 2;
+  const L = p.palmLength;
+  const shape = new THREE.Shape();
+  shape.moveTo(-w0, -6);
+  shape.lineTo(w0 * 0.9, -6);
+  shape.quadraticCurveTo(w1 * 1.25, L * 0.25, w1 * 1.02, L * 0.55); // thumb-side bulge
+  shape.quadraticCurveTo(w1 * 1.02, L * 0.9, w1 * 0.92, L);
+  shape.lineTo(-w1 * 0.92, L);
+  shape.quadraticCurveTo(-w1 * 1.02, L * 0.6, -w0 * 1.02, L * 0.2);
+  shape.quadraticCurveTo(-w0, 0, -w0, -6);
+  const thickness = p.thickness;
+  const bevel = thickness / 2 - 0.5;
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness - 2 * bevel,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 6,
+    curveSegments: 24,
+  });
+  // Shape y ran towards the fingertips; turn it to run along -Z with the
+  // thickness centred on y = 0.
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, -(thickness - 2 * bevel) / 2, 0);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function disposeChildren(group) {
   while (group.children.length) {
     const child = group.children[0];
     child.traverse((node) => {
       node.geometry?.dispose();
-      if (node.material && !node.material.__shared) node.material.dispose?.();
+      node.material?.dispose?.();
     });
     group.remove(child);
   }
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const setText = (root, selector, text) => {
+  const el = root.querySelector(selector);
+  if (el) el.textContent = text;
+};
 
-// A small studio environment for reflections, after three.js's RoomEnvironment (MIT).
-function roomEnvironment() {
+// Directions of the small bright lamps in the studio, shared by the
+// environment map and the glint shader so highlights and sparkles agree.
+const STUDIO_LIGHT_DIRECTIONS = [
+  [-0.6, 1, 0.5],
+  [0.7, 0.9, 0.3],
+  [0.1, 1, -0.7],
+  [-0.9, 0.5, -0.4],
+  [0.9, 0.35, 0.7],
+  [0, 0.4, 1],
+  [-0.4, 0.8, -0.9],
+  [0.5, 0.2, -1],
+];
+
+// A small studio for reflections: a soft grey room, three large panels and
+// a ring of small hot lamps that give the facets something to flash.
+function studioEnvironment() {
   const scene = new THREE.Scene();
-  const geometry = new THREE.BoxGeometry();
-  geometry.deleteAttribute("uv");
-  const room = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ side: THREE.BackSide, color: 0x9a9a9a, roughness: 1 }));
-  room.position.y = -0.2;
-  room.scale.set(6, 6, 6);
+  const room = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ side: THREE.BackSide, color: 0x555555, roughness: 1 }));
+  room.scale.set(8, 8, 8);
   scene.add(room);
-  const light = (x, y, z, sx, sy, sz, intensity) => {
+  const panel = (x, y, z, sx, sy, sz, intensity) => {
     const box = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(intensity) }));
     box.position.set(x, y, z);
     box.scale.set(sx, sy, sz);
     scene.add(box);
   };
-  light(-2, 1.5, 2, 1.2, 0.1, 1.2, 12); // key overhead
-  light(2, 2.2, -1, 0.8, 0.1, 2, 6);
-  light(0, -2.5, 2.4, 2.4, 0.1, 0.6, 3);
-  light(-2.9, 0.4, 0, 0.1, 1.2, 1.6, 4);
-  light(2.9, -0.2, 0.8, 0.1, 1.4, 1.2, 4);
-  light(0.4, 2.9, 0.6, 0.6, 0.1, 0.6, 20); // a small hot spot for sparkle
+  panel(-2.5, 3, 1.5, 2.2, 0.1, 1.6, 8);
+  panel(2.6, 2.2, -1.5, 1.4, 0.1, 2.4, 5);
+  panel(0, -3.5, 2, 3, 0.1, 1, 2);
+  for (const [x, y, z] of STUDIO_LIGHT_DIRECTIONS) {
+    panel(x * 3.6, y * 3.6, z * 3.6, 0.22, 0.22, 0.22, 40);
+  }
   return scene;
 }
 

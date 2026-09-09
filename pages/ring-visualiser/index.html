@@ -109,28 +109,26 @@
 </div>
 
     <main id="MainContent" tabindex="-1"><div class="shopify-section " id="shopify-section-visualiser">
-
 <script type="importmap">{"imports":{"three":"/gems-by-rich-preview/assets/three.module.min.js","ring-model":"/gems-by-rich-preview/assets/ring-model.js"}}</script>
 <section class="visualiser section-space" aria-labelledby="VisualiserTitle-visualiser">
   <div class="section-title">
     <h1 id="VisualiserTitle-visualiser">Try a ring</h1>
-    <p>Swap the setting, stone and hand size to see how a ring might sit.</p>
+    <p>Swap the setting, stone and hand to see how a ring might sit.</p>
   </div>
-  <ring-visualiser class="visualiser__app" data-finger-x="43.9" data-finger-y="58.5" data-finger-width="12.4" data-finger-angle="-4">
+  <ring-visualiser class="visualiser__app">
     <div class="visualiser__stage" data-stage>
-      <img class="visualiser__photo" data-hand-photo src="/gems-by-rich-preview/assets/stock-hand.jpg" width="1400" height="1750" alt="A hand seen from above, palm down, against a dark background" crossorigin="anonymous">
-      <canvas class="visualiser__canvas" aria-label="Three-dimensional ring preview. Drag to turn the ring." role="img"></canvas>
+      <canvas class="visualiser__canvas" aria-label="Three-dimensional preview of the ring on a hand. Drag to look around." role="img"></canvas>
       <div class="visualiser__views" role="group" aria-label="View">
         <button type="button" class="visualiser__view" data-view="hand" aria-pressed="true">On the hand</button>
         <button type="button" class="visualiser__view" data-view="closeup" aria-pressed="false">Close up</button>
       </div>
-      <p class="visualiser__hint small" aria-hidden="true">Drag to turn the ring</p>
+      <p class="visualiser__hint small" aria-hidden="true">Drag to look around</p>
       <p class="visualiser__fallback small" data-fallback-note hidden>The three-dimensional preview needs WebGL. Your choices below still build a summary you can send to Rich.</p>
     </div>
     <form class="visualiser__controls" onsubmit="return false">
       <div class="visualiser__group">
         <p class="caps" id="VisShape-visualiser">Stone shape</p>
-        <div class="visualiser__options visualiser__options--shapes" role="radiogroup" aria-labelledby="VisShape-visualiser" data-options="shape"></div>
+        <div class="visualiser__options" role="radiogroup" aria-labelledby="VisShape-visualiser" data-options="shape"></div>
       </div>
       <div class="visualiser__group">
         <label class="caps" for="VisCarat-visualiser">Carat weight</label>
@@ -143,12 +141,34 @@
       </div>
       <div class="visualiser__group">
         <p class="caps" id="VisMetal-visualiser">Metal</p>
-        <div class="visualiser__options visualiser__options--metals" role="radiogroup" aria-labelledby="VisMetal-visualiser" data-options="metal"></div>
+        <div class="visualiser__options visualiser__options--swatches" role="radiogroup" aria-labelledby="VisMetal-visualiser" data-options="metal"></div>
       </div>
       <div class="visualiser__group">
-        <p class="caps" id="VisSize-visualiser">Hand size</p>
-        <div class="visualiser__options" role="radiogroup" aria-labelledby="VisSize-visualiser" data-options="size"></div>
-        <p class="small">The same photograph is scaled to each ring size, so a larger hand makes the same stone look smaller.</p>
+        <p class="caps" id="VisHand-visualiser">Hand size</p>
+        <div class="visualiser__options" role="radiogroup" aria-labelledby="VisHand-visualiser" data-options="hand"></div>
+        <details class="visualiser__measure">
+          <summary>Measure your own hand</summary>
+          <p class="small">Lay your hand flat and use a ruler. Wrap a strip of paper around the base of your ring finger and divide its length by 3.14 for the width.</p>
+          <div class="visualiser__slider">
+            <label for="VisLength-visualiser">Hand length <span class="small">wrist crease to middle fingertip</span></label>
+            <input class="visualiser__range" id="VisLength-visualiser" type="range" data-measure="length" min="150" max="230" step="1" value="180">
+            <output data-readout="length">18.0 cm</output>
+          </div>
+          <div class="visualiser__slider">
+            <label for="VisSpan-visualiser">Hand span <span class="small">thumb tip to little fingertip, spread</span></label>
+            <input class="visualiser__range" id="VisSpan-visualiser" type="range" data-measure="span" min="160" max="260" step="1" value="205">
+            <output data-readout="span">20.5 cm</output>
+          </div>
+          <div class="visualiser__slider">
+            <label for="VisFinger-visualiser">Ring finger width <span class="small">where the ring sits</span></label>
+            <input class="visualiser__range" id="VisFinger-visualiser" type="range" data-measure="finger" min="14" max="22" step="0.1" value="16.8">
+            <output data-readout="finger">16.8 mm</output>
+          </div>
+        </details>
+      </div>
+      <div class="visualiser__group">
+        <p class="caps" id="VisTone-visualiser">Hand tone</p>
+        <div class="visualiser__options visualiser__options--swatches" role="radiogroup" aria-labelledby="VisTone-visualiser" data-options="tone"></div>
       </div>
       <div class="visualiser__summary">
         <p class="small" data-summary></p>
@@ -156,7 +176,7 @@
       </div>
     </form>
   </ring-visualiser>
-  <p class="small visualiser__note">Illustrative proportions and generic settings, over a stock photograph. Not a quotation or a specific stone.</p>
+  <p class="small visualiser__note">Illustrative proportions and generic settings on a modelled hand. Not a quotation or a specific stone.</p>
 </section>
 <script type="module" src="/gems-by-rich-preview/assets/ring-visualiser.js"></script>
 

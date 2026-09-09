@@ -1590,3 +1590,47 @@ ring-visualiser[data-fallback] .visualiser__canvas {
     grid-template-columns: 1fr;
   }
 }
+.visualiser__options--swatches button::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--swatch);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  vertical-align: -1px;
+}
+.visualiser__measure {
+  border: 1px solid var(--rule);
+  padding: 0 16px;
+}
+.visualiser__measure summary {
+  padding: 12px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.visualiser__measure > p {
+  margin-bottom: 8px;
+}
+.visualiser__slider {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--rule);
+}
+.visualiser__slider label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  font-size: 14px;
+  font-weight: 600;
+}
+.visualiser__slider output {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
