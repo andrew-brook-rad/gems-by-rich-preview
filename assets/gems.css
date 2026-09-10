@@ -1460,6 +1460,13 @@ background-film[data-playing] .film-hero__video {
 .visualiser__stage:active {
   cursor: grabbing;
 }
+.visualiser__photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .visualiser__canvas {
   position: absolute;
   inset: 0;
@@ -1476,6 +1483,9 @@ ring-visualiser[data-ready] .visualiser__canvas {
   opacity: 1;
 }
 ring-visualiser[data-fallback] .visualiser__canvas {
+  display: none;
+}
+ring-visualiser[data-ready] .visualiser__photo {
   display: none;
 }
 .visualiser__views {

@@ -1,10 +1,11 @@
-// Ring visualiser: a studio ring with an optional hand outline, built from
+// Ring visualiser: a studio ring over a calibrated hand photograph, built from
 // measurements in millimetres. See docs/superpowers/specs/2026-09-09-ring-visualiser-design.md
 import * as THREE from "three";
 import {
   CARAT_RANGE,
   HAND_PRESETS,
   HAND_RANGE,
+  LIGHTS,
   METALS,
   SETTINGS,
   SHAPES,
@@ -34,8 +35,15 @@ class RingVisualiser extends HTMLElement {
     this.view = "closeup";
     this.orbit = { azimuth: 0.28, polar: 0.32, distance: 65 };
     this.zoom = 1;
+    this.calibration = {
+      x: numberOr(this.dataset.fingerX, 43.9) / 100,
+      y: numberOr(this.dataset.fingerY, 58.5) / 100,
+      width: numberOr(this.dataset.fingerWidth, 12.4) / 100,
+      angle: numberOr(this.dataset.fingerAngle, -4) * DEG,
+    };
     this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.stage = this.querySelector("[data-stage]");
+    this.photo = this.querySelector("[data-hand-photo]");
     this.buildControls();
     this.reflectControls();
     try {
@@ -46,8 +54,35 @@ class RingVisualiser extends HTMLElement {
     }
     this.rebuild();
     this.bindInteraction();
-    this.startLoop();
+    this.loadHandPhoto();
     this.loadStones();
+  }
+
+  loadHandPhoto() {
+    if (!this.photo?.src) return;
+    new THREE.TextureLoader().load(
+      this.photo.currentSrc || this.photo.src,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        this.handTexture = texture;
+        this.handPlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, texture.image.height / texture.image.width),
+          new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false }),
+        );
+        this.handPlane.renderOrder = -1;
+        this.scene.add(this.handPlane);
+        this.handPhotoReady = true;
+        this.photo.hidden = true;
+        this.layoutHandPhoto();
+        if (this.hand) this.hand.visible = false;
+        this.requestRender();
+      },
+      undefined,
+      () => {
+        this.photoFailed = true;
+        this.requestRender();
+      },
+    );
   }
 
   // Real facet meshes arrive after the first frame; until then, and if they
@@ -74,6 +109,7 @@ class RingVisualiser extends HTMLElement {
       shape: SHAPES.map((s) => [s, s === "Round" ? "Round brilliant" : s]),
       setting: SETTINGS.map((s) => [s.id, s.label]),
       metal: METALS.map((m) => [m.id, m.label, m.color]),
+      light: LIGHTS.map((l) => [l.id, l.label]),
       hand: HAND_PRESETS.map((p) => [p.id, p.label]),
     };
     for (const [key, options] of Object.entries(groups)) {
@@ -124,7 +160,7 @@ class RingVisualiser extends HTMLElement {
 
   reflectControls() {
     const preset = matchingPreset(this.state);
-    for (const key of ["shape", "setting", "metal", "tone", "hand"]) {
+    for (const key of ["shape", "setting", "metal", "light", "hand"]) {
       this.querySelectorAll(`[data-set="${key}"]`).forEach((button) => {
         const current = key === "hand" ? preset?.id : this.state[key];
         button.setAttribute("aria-checked", String(button.dataset.value === current));
@@ -143,7 +179,7 @@ class RingVisualiser extends HTMLElement {
     setText(this, "[data-readout=span]", `${(this.state.span / 10).toFixed(1)} cm`);
     setText(this, "[data-readout=finger]", `${this.state.finger.toFixed(1)} mm · about UK ${size.uk} / US ${size.us}`);
     setText(this, "[data-summary]", describeRing(this.state));
-    setText(this, ".visualiser__hint", this.view === "hand" ? "Hand outline · Approximate scale" : "Drag to rotate · Pinch to zoom");
+    setText(this, ".visualiser__hint", this.view === "hand" ? "Photograph · Approximate scale" : "Drag to rotate · Pinch to zoom");
     this.querySelectorAll("[data-view]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.view === this.view));
     });
@@ -154,10 +190,10 @@ class RingVisualiser extends HTMLElement {
 
   update() {
     this.reflectControls();
-    if (this.renderer) {
-      this.rebuild();
-      this.requestRender();
-    }
+    if (!this.renderer) return;
+    if (this.state.light !== this.lit) this.buildEnvironment();
+    else this.rebuild();
+    this.requestRender();
   }
 
   /* Scene */
@@ -171,38 +207,11 @@ class RingVisualiser extends HTMLElement {
     this.renderer.toneMappingExposure = 1.0;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x191c1b);
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    const studio = studioEnvironment();
-    this.environmentTarget = pmrem.fromScene(studio, 0.01);
-    this.scene.environment = this.environmentTarget.texture;
-    pmrem.dispose();
-    // The gems trace rays into a sharp, high-range copy of the same studio so
-    // each facet flashes a distinct lamp rather than a blurred average.
-    this.gemEnvironment = new THREE.WebGLCubeRenderTarget(256, {
-      type: THREE.HalfFloatType,
-      generateMipmaps: true,
-      minFilter: THREE.LinearMipmapLinearFilter,
-    });
-    new THREE.CubeCamera(0.1, 100, this.gemEnvironment).update(this.renderer, studio);
-    disposeChildren(studio);
     this.gemLibrary = new Map();
+    this.buildEnvironment();
     this.camera = new THREE.PerspectiveCamera(28, 1, 1, 3000);
     this.world = new THREE.Group();
     this.scene.add(this.world);
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
-    key.position.set(-120, 260, 160);
-    this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0xffffff, 0.6);
-    rim.position.set(160, 120, -220);
-    this.scene.add(rim);
-    this.scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x62503a, 0.65));
-    for (const [i, direction] of STUDIO_LIGHT_DIRECTIONS.entries()) {
-      if (i % 3 !== 0) continue;
-      const lamp = new THREE.DirectionalLight(i % 3 === 0 ? 0xffedcf : 0xeaf2ff, 0.45);
-      lamp.position.set(...direction).multiplyScalar(150);
-      this.scene.add(lamp);
-    }
-    this.glintLights = STUDIO_LIGHT_DIRECTIONS.map((d) => new THREE.Vector3(...d).normalize());
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.stage);
     this.resize();
@@ -211,7 +220,49 @@ class RingVisualiser extends HTMLElement {
   rebuild() {
     disposeChildren(this.world);
     this.buildHand();
+    this.layoutHandPhoto();
     this.frameCamera();
+  }
+
+  // Two copies of the chosen studio: a filtered one for the metal and a
+  // sharp, high-range cube map the gems trace into. Every flash on a facet
+  // is one of the studio's lamps, so changing the lights changes the sparkle.
+  buildEnvironment() {
+    const light = LIGHTS.find((l) => l.id === this.state.light) || LIGHTS[0];
+    this.lit = light.id;
+    const studio = studioEnvironment(light);
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.environmentTarget?.dispose();
+    this.environmentTarget = pmrem.fromScene(studio, 0.01);
+    this.scene.environment = this.environmentTarget.texture;
+    pmrem.dispose();
+    if (!this.gemEnvironment) {
+      this.gemEnvironment = new THREE.WebGLCubeRenderTarget(256, {
+        type: THREE.HalfFloatType,
+        generateMipmaps: true,
+        minFilter: THREE.LinearMipmapLinearFilter,
+      });
+    }
+    new THREE.CubeCamera(0.1, 100, this.gemEnvironment).update(this.renderer, studio);
+    disposeChildren(studio);
+    // Matching direct lights give the metal its highlights from the same lamps.
+    if (this.lightRig) this.scene.remove(this.lightRig);
+    this.lightRig = new THREE.Group();
+    const { floor, ceiling, tint } = light.room;
+    const sky = new THREE.Color(...tint).multiplyScalar(ceiling);
+    this.lightRig.add(new THREE.HemisphereLight(sky, new THREE.Color().setScalar(floor), 0.8));
+    const lampTint = new THREE.Color(...(light.tint || [1, 1, 1]));
+    for (const [x, y, z, , , , intensity] of light.panels) {
+      const lamp = new THREE.DirectionalLight(lampTint, Math.min(2, intensity * 0.3));
+      lamp.position.set(x, y, z).multiplyScalar(40);
+      this.lightRig.add(lamp);
+    }
+    for (const [x, y, z, , intensity] of light.lamps.filter((_, i) => i % 3 === 0)) {
+      const lamp = new THREE.DirectionalLight(lampTint, Math.min(1, intensity * 0.03));
+      lamp.position.set(x, y, z).multiplyScalar(40);
+      this.lightRig.add(lamp);
+    }
+    this.scene.add(this.lightRig);
   }
 
   // One unit-width facet mesh and ray-tracing material per shape, scaled per
@@ -252,16 +303,34 @@ class RingVisualiser extends HTMLElement {
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(shape.getPoints(12).map(v => new THREE.Vector3(v.x, 0, -v.y))), new THREE.LineBasicMaterial({ color: 0xc2b7a2, transparent: true, opacity: 0.65 }));
     hand.add(line);
     this.world.add(hand);
-    hand.visible = this.view === "hand";
+    hand.visible = this.view === "hand" && !this.handPhotoReady;
     const f = p.fingers.find(f => f.id === "ring");
     this.ringMount = new THREE.Group();
     const along = f.length * 0.22;
     this.ringMount.position.set(f.base.x + Math.sin(f.spread * DEG) * along, 0, -f.base.y - Math.cos(f.spread * DEG) * along);
-    this.ringMount.rotation.set(-Math.PI / 2, 0, f.spread * DEG);
+    this.ringMount.rotation.set(-Math.PI / 2, 0, this.calibration.angle);
     this.world.add(this.ringMount);
     this.buildRing(f.width / 2 + 0.35);
     this.hand = hand;
     this.handLength = p.length;
+  }
+
+  // The photograph is scaled from the measured ring-finger width, then placed
+  // behind the 3D ring at the calibrated point on that finger.
+  layoutHandPhoto() {
+    if (!this.handPlane || !this.ringMount) return;
+    const planeW = this.state.finger / this.calibration.width;
+    const planeH = planeW * this.handPlane.geometry.parameters.height;
+    const mount = this.ringMount.position;
+    this.handPlane.scale.set(planeW, planeH, 1);
+    this.handPlane.position.set(
+      mount.x + (0.5 - this.calibration.x) * planeW,
+      -BAND_TUBE - 0.25,
+      mount.z + (0.5 - this.calibration.y) * planeH,
+    );
+    this.handPlane.rotation.set(-Math.PI / 2, 0, 0);
+    this.handPlane.visible = this.view === "hand";
+    this.photoAspect = planeH / planeW;
   }
 
   /* Ring, built z-up inside ringMount (which is rotated onto the finger) */
@@ -293,13 +362,11 @@ class RingVisualiser extends HTMLElement {
         const mesh = new THREE.Mesh(gem.geometry, gem.material);
         mesh.scale.setScalar(dimensions.width);
         mesh.userData.shared = true;
-        mesh.add(glints(gem.geometry, this.glintLights, dimensions.width));
         host.add(mesh);
         return;
       }
       const geometry = stoneGeometry(shape, dimensions, 32);
       host.add(new THREE.Mesh(geometry, stone));
-      host.add(glints(geometry, this.glintLights, dimensions.width));
     };
     const addBasket = (host, shape, dimensions, prongs = 4) => {
       const seat = settingProfile(dimensions, R);
@@ -476,7 +543,8 @@ class RingVisualiser extends HTMLElement {
     this.orbit.polar = view === "hand" ? 0.01 : view === "top" ? 0.01 : 0.32;
     this.zoom = 1;
     if (!this.renderer) return;
-    this.hand.visible = view === "hand";
+    this.hand.visible = view === "hand" && !this.handPhotoReady;
+    if (this.handPlane) this.handPlane.visible = view === "hand";
     this.frameCamera();
     this.reflectControls();
     this.requestRender();
@@ -544,26 +612,7 @@ class RingVisualiser extends HTMLElement {
     this.intersectionObserver.observe(this.stage);
   }
 
-  // Animate the studio reflections gently, keeping the chosen camera still.
-  startLoop() {
-    let last = 0;
-    const tick = now => {
-      if (!this.isConnected) return;
-      if (this.visible && !document.hidden && !this.dragging && !this.reducedMotion && this.view !== "hand" && now - last > 32) {
-        last = now;
-        this.world.traverse(node => {
-          if (node.material?.uniforms?.time) node.material.uniforms.time.value = now / 1000;
-        });
-        this.renderer.render(this.scene, this.camera);
-        this.setAttribute("data-ready", "");
-      }
-      this.animation = requestAnimationFrame(tick);
-    };
-    this.animation = requestAnimationFrame(tick);
-  }
-
   disconnectedCallback() {
-    cancelAnimationFrame(this.animation);
     this.resizeObserver?.disconnect();
     this.intersectionObserver?.disconnect();
     if (this.world) disposeChildren(this.world);
@@ -674,75 +723,6 @@ function stoneGeometry(shape, dims, steps) {
   return geometry;
 }
 
-// Sparkle: one point per facet whose brightness follows the reflection of the
-// studio lights, drawn as an additive four-point star.
-function glints(geometry, lightDirections, size) {
-  const pos = geometry.getAttribute("position");
-  const centres = [];
-  const normals = [];
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  const n = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i += 3) {
-    a.fromBufferAttribute(pos, i);
-    b.fromBufferAttribute(pos, i + 1);
-    c.fromBufferAttribute(pos, i + 2);
-    n.copy(b).sub(a).cross(c.clone().sub(a)).normalize();
-    if (n.z < 0.1 || n.z > 0.99) continue;
-    const centre = a.clone().add(b).add(c).multiplyScalar(1 / 3).addScaledVector(n, 0.05);
-    centres.push(centre.x, centre.y, centre.z);
-    normals.push(n.x, n.y, n.z);
-  }
-  const points = new THREE.BufferGeometry();
-  points.setAttribute("position", new THREE.Float32BufferAttribute(centres, 3));
-  points.setAttribute("facetNormal", new THREE.Float32BufferAttribute(normals, 3));
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    uniforms: {
-      lights: { value: lightDirections },
-      baseSize: { value: Math.min(26, size * 4) },
-      time: { value: 0 },
-    },
-    vertexShader: `
-      attribute vec3 facetNormal;
-      uniform vec3 lights[${lightDirections.length}];
-      uniform float baseSize;
-      uniform float time;
-      varying float vAlpha;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vec3 n = normalize(mat3(modelMatrix) * facetNormal);
-        vec3 v = normalize(cameraPosition - wp.xyz);
-        vec3 r = reflect(-v, n);
-        float s = 0.0;
-        for (int i = 0; i < ${lightDirections.length}; i++) {
-          s = max(s, pow(max(dot(r, normalize(lights[i] + vec3(sin(time * 0.65 + float(i)) * 0.09, 0.0, cos(time * 0.55 + float(i)) * 0.09))), 0.0), 38.0));
-        }
-        s *= smoothstep(0.0, 0.25, dot(n, v));
-        s *= 0.45 + 0.55 * pow(0.5 + 0.5 * sin(time * 1.8 + position.x * 7.0 + position.y * 11.0), 4.0);
-        vAlpha = s * 0.85;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = clamp(baseSize * sqrt(s) * (65.0 / -mv.z), 1.0, 42.0);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: `
-      varying float vAlpha;
-      void main() {
-        vec2 p = gl_PointCoord * 2.0 - 1.0;
-        float r = length(p);
-        float star = pow(max(0.0, 1.0 - abs(p.x)), 7.0) + pow(max(0.0, 1.0 - abs(p.y)), 7.0);
-        float core = exp(-r * r * 7.0);
-        float a = clamp(core + 0.7 * star * max(0.0, 1.0 - r), 0.0, 1.0) * vAlpha;
-        if (a < 0.02) discard;
-        gl_FragColor = vec4(1.0, 1.0, 1.0, a);
-      }`,
-  });
-  return new THREE.Points(points, material);
-}
-
 // A metal rim following the outline (bezel, gallery under the stone, halo base).
 function rimGeometry(shape, dims, scale, tube, z = 0, clearance = 0) {
   const points = settingContour(shape, dims, clearance, scale).map(([x, y]) => new THREE.Vector3(x, y, z));
@@ -763,33 +743,14 @@ function disposeChildren(group) {
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const setText = (root, selector, text) => {
   const el = root.querySelector(selector);
   if (el) el.textContent = text;
 };
 
-// Directions of the small bright lamps in the studio, shared by the
-// environment map and the glint shader so highlights and sparkles agree.
-const STUDIO_LIGHT_DIRECTIONS = [
-  [-0.6, 1, 0.5],
-  [0.7, 0.9, 0.3],
-  [0.1, 1, -0.7],
-  [-0.9, 0.5, -0.4],
-  [0.9, 0.35, 0.7],
-  [0, 0.4, 1],
-  [-0.4, 0.8, -0.9],
-  [0.5, 0.2, -1],
-  [-0.2, 1, 0.15],
-  [0.3, 1, -0.2],
-  [-1, 0.25, 0.2],
-  [1, 0.6, -0.2],
-];
-
-// A small studio for reflections: a graded room that is bright above and
-// dim below, three large soft panels, and a ring of hot lamps. Crown facets
-// pick up the bright ceiling and lamps while pavilion facets return the dark
-// floor, which is the contrast a cut stone needs to read as a diamond.
-function studioEnvironment() {
+// Build one of the LIGHTS setups as a small scene for reflections.
+function studioEnvironment(light) {
   const scene = new THREE.Scene();
   const room = new THREE.SphereGeometry(8, 48, 24);
   const positions = room.getAttribute("position");
@@ -798,25 +759,23 @@ function studioEnvironment() {
     const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
     return t * t * (3 - 2 * t);
   };
+  const { floor, horizon, ceiling, tint } = light.room;
   for (let i = 0; i < positions.count; i++) {
     const height = positions.getY(i) / 8;
-    const value = height < 0 ? 0.04 + 0.14 * smooth(-1, 0, height) : 0.18 + 0.42 * smooth(0, 1, height);
-    colours.push(value, value * 0.995, value * 0.98);
+    const value = height < 0 ? floor + (horizon - floor) * smooth(-1, 0, height) : horizon + (ceiling - horizon) * smooth(0, 1, height);
+    colours.push(value * tint[0], value * tint[1], value * tint[2]);
   }
   room.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
   scene.add(new THREE.Mesh(room, new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true })));
-  const panel = (x, y, z, sx, sy, sz, intensity) => {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(intensity) }));
-    box.position.set(x, y, z);
-    box.scale.set(sx, sy, sz);
-    scene.add(box);
+  const lampTint = new THREE.Color(...(light.tint || [1, 1, 1]));
+  const box = (x, y, z, sx, sy, sz, intensity) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: lampTint.clone().multiplyScalar(intensity) }));
+    mesh.position.set(x, y, z);
+    mesh.scale.set(sx, sy, sz);
+    scene.add(mesh);
   };
-  panel(-2.5, 3, 1.5, 2.6, 0.1, 2.0, 5);
-  panel(2.6, 2.2, -1.5, 1.8, 0.1, 2.8, 3.5);
-  panel(0, -3.5, 2, 3, 0.1, 1, 1.2);
-  for (const [x, y, z] of STUDIO_LIGHT_DIRECTIONS) {
-    panel(x * 3.6, y * 3.6, z * 3.6, 0.4, 0.4, 0.4, 22);
-  }
+  for (const panel of light.panels) box(...panel);
+  for (const [x, y, z, size, intensity] of light.lamps) box(x, y, z, size, size, size, intensity);
   return scene;
 }
 

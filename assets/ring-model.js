@@ -301,11 +301,50 @@ export const METALS = [
 
 export const CARAT_RANGE = { min: 0.3, max: 5, step: 0.05 };
 
+// Studio lighting the visitor can switch between. Each is a graded room
+// (brightness at the floor, horizon and ceiling), soft panels and a set of
+// small hot lamps; the lamps are what the facets flash as the ring turns.
+// Lamp entries are [x, y, z, size, intensity]; panels are [x, y, z, sx, sy, sz, intensity].
+const LAMP_DIRECTIONS = [
+  [-0.6, 1, 0.5], [0.7, 0.9, 0.3], [0.1, 1, -0.7], [-0.9, 0.5, -0.4],
+  [0.9, 0.35, 0.7], [0, 0.4, 1], [-0.4, 0.8, -0.9], [0.5, 0.2, -1],
+  [-0.2, 1, 0.15], [0.3, 1, -0.2], [-1, 0.25, 0.2], [1, 0.6, -0.2],
+];
+const lamps = (size, intensity, every = 1) => LAMP_DIRECTIONS.filter((_, i) => i % every === 0).map(([x, y, z]) => [x * 3.6, y * 3.6, z * 3.6, size, intensity]);
+export const LIGHTS = [
+  {
+    id: "studio", label: "Studio",
+    room: { floor: 0.04, horizon: 0.18, ceiling: 0.6, tint: [1, 0.995, 0.98] },
+    panels: [[-2.5, 3, 1.5, 2.6, 0.1, 2.0, 5], [2.6, 2.2, -1.5, 1.8, 0.1, 2.8, 3.5], [0, -3.5, 2, 3, 0.1, 1, 1.2]],
+    lamps: lamps(0.4, 22),
+  },
+  {
+    id: "daylight", label: "Daylight",
+    room: { floor: 0.05, horizon: 0.3, ceiling: 0.8, tint: [0.96, 0.98, 1] },
+    panels: [[-2.2, 3.2, 1.2, 0.9, 0.1, 0.9, 40]],
+    lamps: [],
+  },
+  {
+    id: "spotlights", label: "Spotlights",
+    room: { floor: 0.01, horizon: 0.07, ceiling: 0.2, tint: [1, 1, 1] },
+    panels: [],
+    lamps: lamps(0.45, 40),
+  },
+  {
+    id: "candlelight", label: "Candlelight",
+    room: { floor: 0.02, horizon: 0.1, ceiling: 0.22, tint: [1, 0.9, 0.76] },
+    panels: [[0, -3.5, 2, 3, 0.1, 1, 0.6]],
+    lamps: lamps(0.45, 34, 2).map(([x, y, z, size, i]) => [x, y * 0.5, z, size, i]),
+    tint: [1, 0.82, 0.58],
+  },
+];
+
 const DEFAULT_STATE = {
   setting: "solitaire",
   shape: "Round",
   carat: 1.5,
   metal: "yellow",
+  light: "studio",
   tone: "porcelain",
   length: 180,
   span: 205,
@@ -322,6 +361,8 @@ export function parseState(params) {
   if (METALS.some((m) => m.id === metal)) state.metal = metal;
   const tone = params.get("tone");
   if (HAND_TONES.some((t) => t.id === tone)) state.tone = tone;
+  const light = params.get("light");
+  if (LIGHTS.some((l) => l.id === light)) state.light = light;
   const preset = HAND_PRESETS.find((p) => p.id === params.get("hand"));
   if (preset) Object.assign(state, { length: preset.length, span: preset.span, finger: preset.finger });
   for (const key of ["length", "span", "finger"]) {
