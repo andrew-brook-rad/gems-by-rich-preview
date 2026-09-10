@@ -1,4 +1,4 @@
-// Ring visualiser: a studio ring over a calibrated hand photograph, built from
+// Ring visualiser: a studio ring with an optional hand outline, built from
 // measurements in millimetres. See docs/superpowers/specs/2026-09-09-ring-visualiser-design.md
 import * as THREE from "three";
 import {
@@ -35,15 +35,8 @@ class RingVisualiser extends HTMLElement {
     this.view = "closeup";
     this.orbit = { azimuth: 0.28, polar: 0.32, distance: 65 };
     this.zoom = 1;
-    this.calibration = {
-      x: numberOr(this.dataset.fingerX, 43.9) / 100,
-      y: numberOr(this.dataset.fingerY, 58.5) / 100,
-      width: numberOr(this.dataset.fingerWidth, 12.4) / 100,
-      angle: numberOr(this.dataset.fingerAngle, -4) * DEG,
-    };
     this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.stage = this.querySelector("[data-stage]");
-    this.photo = this.querySelector("[data-hand-photo]");
     this.buildControls();
     this.reflectControls();
     try {
@@ -54,35 +47,7 @@ class RingVisualiser extends HTMLElement {
     }
     this.rebuild();
     this.bindInteraction();
-    this.loadHandPhoto();
     this.loadStones();
-  }
-
-  loadHandPhoto() {
-    if (!this.photo?.src) return;
-    new THREE.TextureLoader().load(
-      this.photo.currentSrc || this.photo.src,
-      (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        this.handTexture = texture;
-        this.handPlane = new THREE.Mesh(
-          new THREE.PlaneGeometry(1, texture.image.height / texture.image.width),
-          new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false }),
-        );
-        this.handPlane.renderOrder = -1;
-        this.scene.add(this.handPlane);
-        this.handPhotoReady = true;
-        this.photo.hidden = true;
-        this.layoutHandPhoto();
-        if (this.hand) this.hand.visible = false;
-        this.requestRender();
-      },
-      undefined,
-      () => {
-        this.photoFailed = true;
-        this.requestRender();
-      },
-    );
   }
 
   // Real facet meshes arrive after the first frame; until then, and if they
@@ -179,7 +144,7 @@ class RingVisualiser extends HTMLElement {
     setText(this, "[data-readout=span]", `${(this.state.span / 10).toFixed(1)} cm`);
     setText(this, "[data-readout=finger]", `${this.state.finger.toFixed(1)} mm · about UK ${size.uk} / US ${size.us}`);
     setText(this, "[data-summary]", describeRing(this.state));
-    setText(this, ".visualiser__hint", this.view === "hand" ? "Photograph · Approximate scale" : "Drag to rotate · Pinch to zoom");
+    setText(this, ".visualiser__hint", this.view === "hand" ? "Hand outline · Approximate scale" : "Drag to rotate · Pinch to zoom");
     this.querySelectorAll("[data-view]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.view === this.view));
     });
@@ -220,7 +185,6 @@ class RingVisualiser extends HTMLElement {
   rebuild() {
     disposeChildren(this.world);
     this.buildHand();
-    this.layoutHandPhoto();
     this.frameCamera();
   }
 
@@ -303,34 +267,16 @@ class RingVisualiser extends HTMLElement {
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(shape.getPoints(12).map(v => new THREE.Vector3(v.x, 0, -v.y))), new THREE.LineBasicMaterial({ color: 0xc2b7a2, transparent: true, opacity: 0.65 }));
     hand.add(line);
     this.world.add(hand);
-    hand.visible = this.view === "hand" && !this.handPhotoReady;
+    hand.visible = this.view === "hand";
     const f = p.fingers.find(f => f.id === "ring");
     this.ringMount = new THREE.Group();
     const along = f.length * 0.22;
     this.ringMount.position.set(f.base.x + Math.sin(f.spread * DEG) * along, 0, -f.base.y - Math.cos(f.spread * DEG) * along);
-    this.ringMount.rotation.set(-Math.PI / 2, 0, this.calibration.angle);
+    this.ringMount.rotation.set(-Math.PI / 2, 0, f.spread * DEG);
     this.world.add(this.ringMount);
     this.buildRing(f.width / 2 + 0.35);
     this.hand = hand;
     this.handLength = p.length;
-  }
-
-  // The photograph is scaled from the measured ring-finger width, then placed
-  // behind the 3D ring at the calibrated point on that finger.
-  layoutHandPhoto() {
-    if (!this.handPlane || !this.ringMount) return;
-    const planeW = this.state.finger / this.calibration.width;
-    const planeH = planeW * this.handPlane.geometry.parameters.height;
-    const mount = this.ringMount.position;
-    this.handPlane.scale.set(planeW, planeH, 1);
-    this.handPlane.position.set(
-      mount.x + (0.5 - this.calibration.x) * planeW,
-      -BAND_TUBE - 0.25,
-      mount.z + (0.5 - this.calibration.y) * planeH,
-    );
-    this.handPlane.rotation.set(-Math.PI / 2, 0, 0);
-    this.handPlane.visible = this.view === "hand";
-    this.photoAspect = planeH / planeW;
   }
 
   /* Ring, built z-up inside ringMount (which is rotated onto the finger) */
@@ -543,8 +489,7 @@ class RingVisualiser extends HTMLElement {
     this.orbit.polar = view === "hand" ? 0.01 : view === "top" ? 0.01 : 0.32;
     this.zoom = 1;
     if (!this.renderer) return;
-    this.hand.visible = view === "hand" && !this.handPhotoReady;
-    if (this.handPlane) this.handPlane.visible = view === "hand";
+    this.hand.visible = view === "hand";
     this.frameCamera();
     this.reflectControls();
     this.requestRender();
@@ -743,7 +688,6 @@ function disposeChildren(group) {
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const setText = (root, selector, text) => {
   const el = root.querySelector(selector);
   if (el) el.textContent = text;

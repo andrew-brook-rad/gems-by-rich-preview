@@ -109,21 +109,19 @@
 </div>
 
     <main id="MainContent" tabindex="-1"><div class="shopify-section " id="shopify-section-visualiser">
-
 <script type="importmap">{"imports":{"three":"/gems-by-rich-preview/assets/three.module.min.js","ring-model":"/gems-by-rich-preview/assets/ring-model.js"}}</script>
 <section class="visualiser section-space" aria-labelledby="VisualiserTitle-visualiser">
   <div class="section-title">
     <h1 id="VisualiserTitle-visualiser">Try a ring</h1>
     <p>Find your favourite shape, explore the details, make it yours.</p>
   </div>
-  <ring-visualiser class="visualiser__app" data-stones="/gems-by-rich-preview/assets/ring-stones.json" data-finger-x="43.9" data-finger-y="58.5" data-finger-width="12.4" data-finger-angle="-4">
+  <ring-visualiser class="visualiser__app" data-stones="/gems-by-rich-preview/assets/ring-stones.json">
     <div class="visualiser__stage" data-stage>
-      <img class="visualiser__photo" data-hand-photo src="/gems-by-rich-preview/assets/stock-hand.jpg" width="1400" height="1750" alt="A hand seen from above, palm down, against a dark background" crossorigin="anonymous">
       <canvas class="visualiser__canvas" aria-label="Interactive ring preview. Drag or use arrow keys to rotate. Pinch or use plus and minus to zoom. Home resets the view." tabindex="0" role="img"></canvas>
       <div class="visualiser__views" role="group" aria-label="View">
         <button type="button" class="visualiser__view" data-view="closeup" aria-pressed="true">Ring detail</button>
         <button type="button" class="visualiser__view" data-view="top" aria-pressed="false">Top view</button>
-        <button type="button" class="visualiser__view" data-view="hand" aria-pressed="false">On the hand</button>
+        <button type="button" class="visualiser__view" data-view="hand" aria-pressed="false">Hand outline</button>
       </div>
       <p class="visualiser__hint small" aria-hidden="true">Drag to rotate · Pinch to zoom</p>
       <p class="visualiser__fallback small" data-fallback-note hidden>The three-dimensional preview needs WebGL. Your choices below still build a summary you can send to Rich.</p>
@@ -179,7 +177,7 @@
       </div>
     </form>
   </ring-visualiser>
-  <p class="small visualiser__note">Illustrative proportions and generic settings, over a stock photograph. Not a quotation or a specific stone. Stone facet models: Diamond Gem Shape Set by brandon_grey, CC BY 4.0.</p>
+  <p class="small visualiser__note">Illustrative proportions and generic settings. The optional hand outline is a guide to scale. Not a quotation or a specific stone. Stone facet models: Diamond Gem Shape Set by brandon_grey, CC BY 4.0.</p>
 </section>
 <script type="module" src="/gems-by-rich-preview/assets/ring-visualiser.js"></script>
 
