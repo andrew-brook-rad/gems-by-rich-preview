@@ -3,6 +3,10 @@
 // from 1 at the table down through 0 at the girdle to -1 at the culet. Facets
 // are returned as flat, non-indexed triangles in millimetres so every face
 // keeps its own normal and the surface reads as cut rather than polished.
+// Crown height as a share of the stone's width, shared by the model, the
+// accent seats and the renderer so no file restates it.
+export const CROWN_RATIO = 0.16;
+
 export function stoneTriangles(stones, shape, dims, crown) {
   const source = stones.shapes[shape] || stones.shapes.Round;
   const scale = 1 / stones.quantization;

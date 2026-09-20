@@ -21,7 +21,7 @@ import {
 } from "ring-model";
 
 import { BAND_SECTION, bandGeometry, accentSeat } from "./ring-band.js";
-import { stoneTriangles } from "./ring-stone-geometry.js";
+import { CROWN_RATIO, stoneTriangles } from "./ring-stone-geometry.js";
 import { gemGeometry, gemMaterial } from "./ring-gem.js";
 
 const BAND_TUBE = BAND_SECTION.tube;
@@ -29,13 +29,17 @@ const DEG = Math.PI / 180;
 
 class RingVisualiser extends HTMLElement {
   connectedCallback() {
-    if (this.started) return;
+    if (this.started) {
+      // Re-parented (the theme editor, a script): the DOM and its listeners
+      // survived, the GPU resources did not.
+      if (!this.renderer && !this.hasAttribute("data-fallback")) this.resume();
+      return;
+    }
     this.started = true;
     this.state = parseState(new URLSearchParams(location.search));
     this.view = "closeup";
     this.orbit = { azimuth: 0.28, polar: 0.32, distance: 65 };
     this.zoom = 1;
-    this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.stage = this.querySelector("[data-stage]");
     this.buildControls();
     this.reflectControls();
@@ -47,7 +51,27 @@ class RingVisualiser extends HTMLElement {
     }
     this.rebuild();
     this.bindInteraction();
+    this.observeVisibility();
     this.loadStones();
+  }
+
+  resume() {
+    try {
+      this.initScene();
+    } catch (error) {
+      this.showFallback();
+      return;
+    }
+    this.rebuild();
+    this.observeVisibility();
+    this.requestRender();
+  }
+
+  observeVisibility() {
+    this.visible = true;
+    this.intersectionObserver?.disconnect();
+    this.intersectionObserver = new IntersectionObserver(([entry]) => { this.visible = entry.isIntersecting; });
+    this.intersectionObserver.observe(this.stage);
   }
 
   // Real facet meshes arrive after the first frame; until then, and if they
@@ -236,7 +260,7 @@ class RingVisualiser extends HTMLElement {
     let gem = this.gemLibrary.get(shape);
     if (!gem) {
       const unit = { width: 1, length: dims.length / dims.width, depth: dims.depth / dims.width };
-      const geometry = gemGeometry(THREE, stoneTriangles(this.stones, shape, unit, 0.16));
+      const geometry = gemGeometry(THREE, stoneTriangles(this.stones, shape, unit, CROWN_RATIO));
       const material = gemMaterial(THREE, geometry, this.gemEnvironment.texture);
       gem = { geometry, material };
       this.gemLibrary.set(shape, gem);
@@ -536,8 +560,10 @@ class RingVisualiser extends HTMLElement {
     canvas.addEventListener("lostpointercapture", stop);
     canvas.addEventListener("wheel", event => {
       if (this.view === "hand") return;
+      const next = clamp(this.zoom * Math.exp(-event.deltaY * 0.001), 0.7, 1.8);
+      if (next === this.zoom) return;
       event.preventDefault();
-      this.zoom = clamp(this.zoom * Math.exp(-event.deltaY * 0.001), 0.7, 1.8);
+      this.zoom = next;
       this.frameCamera();
       this.requestRender();
     }, { passive: false });
@@ -552,9 +578,6 @@ class RingVisualiser extends HTMLElement {
       this.frameCamera();
       this.requestRender();
     });
-    this.visible = true;
-    this.intersectionObserver = new IntersectionObserver(([entry]) => { this.visible = entry.isIntersecting; });
-    this.intersectionObserver.observe(this.stage);
   }
 
   disconnectedCallback() {
@@ -568,6 +591,14 @@ class RingVisualiser extends HTMLElement {
     this.environmentTarget?.dispose();
     this.gemEnvironment?.dispose();
     this.renderer?.dispose();
+    this.resizeObserver = null;
+    this.intersectionObserver = null;
+    this.world = null;
+    this.gemLibrary = null;
+    this.environmentTarget = null;
+    this.gemEnvironment = null;
+    this.renderer = null;
+    this.pending = false;
   }
 
   requestRender() {

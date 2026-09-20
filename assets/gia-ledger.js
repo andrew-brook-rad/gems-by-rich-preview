@@ -114,7 +114,12 @@ class GiaLedger extends HTMLElement {
     const url = writeFilters(this.filters, location.href);
     url.searchParams.delete("ds_lab");
     url.searchParams.delete("ds_fluor");
+    url.searchParams.delete("ds_all");
     if (this.fluor) url.searchParams.set("ds_fluor", this.fluor);
+    // A rail cleared to "anything" must not read as a fresh visit, which
+    // would restore the opening preset on reload, back or a shared link.
+    if (![...url.searchParams.keys()].some((key) => key.startsWith("ds_")))
+      url.searchParams.set("ds_all", "1");
     history.replaceState(null, "", url);
   }
 

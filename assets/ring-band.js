@@ -1,6 +1,10 @@
 // Band geometry and accent clearances in millimetres. Receive the renderer's
 // THREE instance so the browser and geometry tests use exactly the same mesh.
+import { CROWN_RATIO } from "./ring-stone-geometry.js";
+
 export const BAND_SECTION = { tube: 0.9, width: 2.1 };
+// Accent stones are round brilliants: total depth as a share of diameter.
+export const ACCENT_DEPTH_RATIO = 0.61;
 
 export function bandGeometry(THREE, innerRadius) {
   const { tube, width } = BAND_SECTION;
@@ -12,7 +16,7 @@ export function bandGeometry(THREE, innerRadius) {
 }
 
 export function accentSeat(innerRadius, diameter) {
-  const pavilion = diameter * (0.61 - 0.16);
+  const pavilion = diameter * (ACCENT_DEPTH_RATIO - CROWN_RATIO);
   const outer = innerRadius + 2 * BAND_SECTION.tube;
   return {
     radius: outer + pavilion + 0.12,

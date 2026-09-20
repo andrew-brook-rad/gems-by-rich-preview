@@ -1,6 +1,8 @@
 // Pure data and geometry helpers for the ring visualiser. No DOM, no three.js,
 // so the whole file is unit-tested in Node. All lengths are millimetres.
 // Sizes are approximations for visual comparison, not measurements of any stone.
+import { BAND_SECTION } from "./ring-band.js";
+import { CROWN_RATIO } from "./ring-stone-geometry.js";
 
 export const SHAPES = [
   "Round",
@@ -265,9 +267,9 @@ SETTINGS.push(
 // The entire pavilion clears the shank. Gallery rails follow the pavilion
 // outside its surface; a hollow basket leaves the culet unobstructed.
 export function settingProfile(dims, innerRadius) {
-  const crown = dims.width * 0.16;
+  const crown = dims.width * CROWN_RATIO;
   const pavilion = dims.depth - crown;
-  const outer = innerRadius + 1.8;
+  const outer = innerRadius + 2 * BAND_SECTION.tube;
   return { crown, pavilion, outer, girdle: outer + pavilion + 0.35, galleryZ: -pavilion * 0.48, galleryScale: 0.60 };
 }
 
